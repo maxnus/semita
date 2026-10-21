@@ -1,7 +1,7 @@
 # semita
 
 Shortest and cheapest paths and distances on a grid, in C, for Python: jump point search for one path, A* for one
-where tiles cost differently, and Dijkstra for every tile's distance or cost from a point. *Semita* is Latin for a
+where tiles cost differently, and Dijkstra for every tile's cheapest path from a point. *Semita* is Latin for a
 footpath.
 
 Written for [NachOS](https://github.com/maxnus/NachOS), a StarCraft II bot library, though nothing in it is about
@@ -21,9 +21,9 @@ assert path.tiles[:3].tolist() == [[0, 0], [1, 1], [1, 2]]
 
 assert semita.find_path(passable, (0, 0), (2, 1)) is None  # the end is blocked
 
-distances = semita.distances_from(passable, (0, 0))
-assert distances[4, 0] == path.distance
-assert distances[2, 1] == float("inf")
+flood = semita.flood_from(passable, (0, 0))  # every tile's cheapest path from (0, 0)
+assert flood.distances[4, 0] == path.distance
+assert flood.distances[2, 1] == float("inf")
 
 # Costs: each value is the cost of moving a unit of distance across its tile, 1 on normal ground and more where it
 # is best avoided; 0 blocks, as False does.
@@ -48,8 +48,9 @@ assert semita.find_path(numpy.ones((7, 7), dtype=bool), (3, 0), (3, 6)).distance
 - A start or an end outside the grid raises `IndexError`; a negative index counts as outside.
 - `find_path` returns a `Path`, its `distance`, its `cost` and its `tiles` from the start to the end, or `None` if
   there is no path. Of several equally cheap paths it returns one, but which is not part of the contract.
-- `distances_from` returns an array of the grid's shape, each tile's cost from the start, `inf` where no path
-  reaches; on a grid of bools, its distance.
+- `flood_from` returns a `Flood`, the cheapest path from the start to every tile found in one pass: its `costs` and
+  its `distances`, two arrays of the grid's shape, `inf` where no path reaches. The distances are the cheapest
+  paths' lengths, of one of them where several cost the same; on a grid of bools they are the costs.
 - A grid whose passable tiles all cost the same, a grid of bools included, is searched by jump point search; any other
   by A*, which visits more tiles, the more so the cheaper the cheapest tile is, since its estimate of what is left is
   the straight distance times that cost.

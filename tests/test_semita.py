@@ -89,7 +89,7 @@ def _tiles_of(passable: NDArray[numpy.bool_], count: int, seed: int) -> list[tup
 def test_every_distance_is_the_shortest_paths(name: str) -> None:
     passable = _TEST_GRIDS[name]
     for start in _tiles_of(passable, 5, seed=11):
-        found = semita.distances_from(passable, start)
+        found = semita.flood_from(passable, start).costs
         expected = _shortest_distances(passable, start)
         assert found.shape == passable.shape
         assert found.dtype == numpy.float64
@@ -129,7 +129,7 @@ def test_the_start_is_a_path_to_itself_even_on_a_blocked_tile() -> None:
     assert path is not None
     assert path.distance == 0.0
     assert path.tiles.tolist() == [[1, 1]]
-    distances = semita.distances_from(passable, (1, 1))
+    distances = semita.flood_from(passable, (1, 1)).costs
     assert distances[1, 1] == 0.0
     assert numpy.isinf(numpy.delete(distances.ravel(), 4)).all()
 
@@ -139,13 +139,13 @@ def test_no_path_leaves_a_blocked_start_or_enters_a_blocked_end() -> None:
     passable[0, 0] = passable[3, 3] = False
     assert semita.find_path(passable, (0, 0), (2, 2)) is None
     assert semita.find_path(passable, (2, 2), (3, 3)) is None
-    assert numpy.isinf(semita.distances_from(passable, (2, 2))[3, 3])
+    assert numpy.isinf(semita.flood_from(passable, (2, 2)).costs[3, 3])
 
 
 def test_no_path_cuts_a_corner() -> None:
     passable = numpy.array([[True, False], [False, True]])
     assert semita.find_path(passable, (0, 0), (1, 1)) is None
-    assert numpy.isinf(semita.distances_from(passable, (0, 0))[1, 1])
+    assert numpy.isinf(semita.flood_from(passable, (0, 0)).costs[1, 1])
 
 
 def test_a_grid_of_numbers_costs_its_values() -> None:
@@ -163,7 +163,7 @@ def test_a_grid_that_is_not_c_contiguous_is_read_by_its_indices() -> None:
     for grid in (passable, _random_costs(passable, seed=14)):
         transposed = numpy.ascontiguousarray(grid.T).T
         assert not transposed.flags.c_contiguous
-        assert numpy.array_equal(semita.distances_from(transposed, start), semita.distances_from(grid, start))
+        assert numpy.array_equal(semita.flood_from(transposed, start).costs, semita.flood_from(grid, start).costs)
         path, same = semita.find_path(transposed, start, end), semita.find_path(grid, start, end)
         assert (path is None) == (same is None)
         if path is not None and same is not None:
@@ -181,7 +181,7 @@ def test_a_paths_tiles_are_read_only() -> None:
 def test_a_tile_outside_the_grid_raises(tile: tuple[int, int]) -> None:
     passable = numpy.ones((5, 4), dtype=bool)
     with pytest.raises(IndexError, match=re.escape(f"the start {tile} is outside the grid's 5 by 4 tiles")):
-        semita.distances_from(passable, tile)
+        semita.flood_from(passable, tile)
     with pytest.raises(IndexError, match=re.escape(f"the end {tile} is outside")):
         semita.find_path(passable, (0, 0), tile)
 
@@ -196,7 +196,7 @@ def test_a_grid_whose_tiles_cost_the_same_finds_what_a_grid_of_bools_finds(dtype
     if path is not None and same is not None:
         assert numpy.array_equal(path.tiles, same.tiles)
         assert (path.distance, path.cost) == (same.distance, 3 * same.cost)
-    found, expected = semita.distances_from(grid, start), semita.distances_from(passable, start)
+    found, expected = semita.flood_from(grid, start).costs, semita.flood_from(passable, start).costs
     reachable = numpy.isfinite(expected)
     assert (numpy.isinf(found) == ~reachable).all()
     assert numpy.abs(found[reachable] - 3 * expected[reachable]).max() < 1e-9
@@ -212,9 +212,9 @@ def test_zero_and_inf_block_a_tile() -> None:
     for blocking in (0.0, math.inf):
         grid = numpy.array([[1.0, blocking, 1.0]])
         assert semita.find_path(grid, (0, 0), (0, 2)) is None
-        assert semita.distances_from(grid, (0, 0)).tolist() == [[0.0, math.inf, math.inf]]
+        assert semita.flood_from(grid, (0, 0)).costs.tolist() == [[0.0, math.inf, math.inf]]
         # As for any blocked start: it is a path to itself, and nothing leaves it.
-        assert semita.distances_from(grid, (0, 1)).tolist() == [[math.inf, 0.0, math.inf]]
+        assert semita.flood_from(grid, (0, 1)).costs.tolist() == [[math.inf, 0.0, math.inf]]
         path = semita.find_path(grid, (0, 1), (0, 1))
         assert path is not None
         assert (path.cost, path.distance) == (0.0, 0.0)
@@ -228,7 +228,7 @@ def test_a_negative_or_nan_cost_raises(cost: float) -> None:
     with pytest.raises(ValueError, match=message):
         semita.find_path(grid, (0, 0), (0, 1))
     with pytest.raises(ValueError, match=message):
-        semita.distances_from(grid, (0, 0))
+        semita.flood_from(grid, (0, 0))
 
 
 def test_a_grid_is_two_dimensional_and_of_bools_or_real_numbers() -> None:
@@ -241,20 +241,20 @@ def test_a_grid_is_two_dimensional_and_of_bools_or_real_numbers() -> None:
         numpy.ones((2, 2), dtype=complex),
     ):
         with pytest.raises(TypeError, match=re.escape(f"bools or real numbers, got {grid.dtype}")):
-            semita.distances_from(grid, (0, 0))
+            semita.flood_from(grid, (0, 0))
 
 
 def test_the_c_module_checks_the_buffers_it_is_handed() -> None:
     passable = numpy.ones((3, 3), dtype=bool)
     with pytest.raises(TypeError, match="9 items of format 'd'"):
-        _search.distances_from(passable, 0, 0, numpy.empty(8))
+        _search.flood_from(passable, 0, 0, numpy.empty(8), numpy.empty(9))
     with pytest.raises(TypeError, match="items of format 'd'"):
-        _search.distances_from(passable, 0, 0, numpy.empty(9, dtype=numpy.float32))
+        _search.flood_from(passable, 0, 0, numpy.empty(9), numpy.empty(9, dtype=numpy.float32))
     for grid in (numpy.ones((3, 3), dtype=numpy.float32), numpy.ones((3, 3), dtype=numpy.uint8)):
         with pytest.raises(TypeError, match="2-D C-contiguous buffer of bool or double"):
             _search.find_path(grid, 0, 0, 2, 2)
     with pytest.raises(IndexError, match="the start"):
-        _search.distances_from(passable, 3, 0, numpy.empty(9))
+        _search.flood_from(passable, 3, 0, numpy.empty(9), numpy.empty(9))
 
 
 def test_searches_on_threads_at_once_find_what_they_find_one_at_a_time() -> None:
@@ -272,7 +272,7 @@ def test_searches_on_threads_at_once_find_what_they_find_one_at_a_time() -> None
         for grid in (passable, _random_costs(passable, seed=17)):
             path = semita.find_path(grid, start, end)
             found.append(None if path is None else (path.cost, path.distance, path.tiles.tolist()))
-            found.append(semita.distances_from(grid, start).tolist())
+            found.append(semita.flood_from(grid, start).costs.tolist())
         return tuple(found)
 
     one_at_a_time = [search(job) for job in jobs]
@@ -299,7 +299,7 @@ def _expected_costs(grid: NDArray[numpy.float64], start: tuple[int, int]) -> NDA
 def test_every_cost_is_the_cheapest_paths(name: str) -> None:
     grid = _random_costs(_TEST_GRIDS[name], seed=18)
     for start in _tiles_of(grid > 0, 5, seed=19):
-        found = semita.distances_from(grid, start)
+        found = semita.flood_from(grid, start).costs
         expected = _expected_costs(grid, start)
         assert (numpy.isinf(found) == numpy.isinf(expected)).all()
         reachable = numpy.isfinite(expected)
@@ -335,11 +335,44 @@ def test_a_path_on_costs_is_a_cheapest_one_of_legal_steps(name: str) -> None:
         assert abs(paid - path.cost) < 1e-9
 
 
+def test_a_flood_on_bools_has_the_costs_for_distances() -> None:
+    passable = _TEST_GRIDS["rooms"]
+    for start in _tiles_of(passable, 5, seed=28):
+        flood = semita.flood_from(passable, start)
+        assert numpy.array_equal(flood.costs, flood.distances)
+
+
+def test_a_floods_distances_are_its_cheapest_paths_lengths() -> None:
+    passable = _TEST_GRIDS["sparse"]
+    grid = _random_costs(passable, seed=29)
+    for start in _tiles_of(grid > 0, 4, seed=31):
+        flood = semita.flood_from(grid, start)
+        reachable = numpy.isfinite(flood.costs)
+        assert (numpy.isfinite(flood.distances) == reachable).all()
+        # Costs from 0.2 to 5 make every cheapest path the only one, so A* finds the one the flood measured.
+        for end in _tiles_of(grid > 0, 15, seed=32):
+            path = semita.find_path(grid, start, end)
+            if path is None:
+                assert not reachable[end]
+                continue
+            assert flood.costs[end] == pytest.approx(path.cost, abs=1e-9)
+            assert flood.distances[end] == pytest.approx(path.distance, abs=1e-9)
+        # No path is shorter than a shortest one.
+        plain = semita.flood_from(passable & numpy.isfinite(grid), start)
+        assert (flood.distances[reachable] >= plain.distances[reachable] - 1e-9).all()
+
+
+def test_a_floods_arrays_are_its_own() -> None:
+    flood = semita.flood_from(numpy.ones((3, 3), dtype=bool), (0, 0))
+    flood.costs[1, 1] = 99.0
+    assert flood.distances[1, 1] == pytest.approx(math.sqrt(2))
+
+
 def test_a_path_costs_the_same_both_ways() -> None:
     grid = _random_costs(_TEST_GRIDS["sparse"], seed=25)
     for one, other in zip(_tiles_of(grid > 0, 10, seed=26), _tiles_of(grid > 0, 10, seed=27), strict=True):
-        there = semita.distances_from(grid, one)[other]
-        back = semita.distances_from(grid, other)[one]
+        there = semita.flood_from(grid, one).costs[other]
+        back = semita.flood_from(grid, other).costs[one]
         assert there == pytest.approx(back, abs=1e-9) or math.isinf(there) and math.isinf(back)
 
 

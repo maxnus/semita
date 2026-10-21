@@ -28,7 +28,7 @@ from numpy.typing import ArrayLike, NDArray
 from semita import _search
 from semita._version import __version__
 
-__all__ = ["Path", "__version__", "distances_from", "find_path"]
+__all__ = ["Flood", "Path", "__version__", "find_path", "flood_from"]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -41,6 +41,17 @@ class Path:
     """What it costs, the sum of its steps' costs: its `distance` on a grid of bools."""
     tiles: NDArray[numpy.intc]
     """Its tiles in order, the start and the end included, as rows `(i, j)`; read-only."""
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class Flood:
+    """The cheapest path from one tile to every tile of a grid, which on a grid of bools is a shortest one."""
+
+    costs: NDArray[numpy.float64]
+    """Each tile's cheapest path's cost, in an array of the grid's shape: `inf` where no path reaches."""
+    distances: NDArray[numpy.float64]
+    """The length of each tile's cheapest path, of one of them if several cost the same: `inf` where no path
+    reaches, and `costs` on a grid of bools."""
 
 
 def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> Path | None:
@@ -60,17 +71,18 @@ def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> 
     return Path(distance, cost, numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2))
 
 
-def distances_from(grid: ArrayLike, start: tuple[int, int]) -> NDArray[numpy.float64]:
-    """The cost of a cheapest path from `start` to each tile over the `grid`, by Dijkstra's algorithm, in an array of
-    the grid's shape: on a grid of bools the length of a shortest one; `inf` where no path reaches.
+def flood_from(grid: ArrayLike, start: tuple[int, int]) -> Flood:
+    """The cheapest path from `start` to each tile over the `grid`, by Dijkstra's algorithm: its cost and its length,
+    found in the one pass.
 
     Raises as `find_path` does.
     """
     tiles_grid = _as_grid(grid)
     start_i, start_j = _checked_tile(tiles_grid, start, "start")
+    costs = numpy.empty(tiles_grid.shape, dtype=numpy.float64)
     distances = numpy.empty(tiles_grid.shape, dtype=numpy.float64)
-    _search.distances_from(tiles_grid, start_i, start_j, distances)
-    return distances
+    _search.flood_from(tiles_grid, start_i, start_j, costs, distances)
+    return Flood(costs, distances)
 
 
 def _as_grid(grid: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.float64]:

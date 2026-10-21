@@ -63,11 +63,12 @@ SearchStatus find_cheapest_path(
 );
 
 /*
- * The cost of the cheapest path from tile `start` to every tile, by Dijkstra's algorithm, into `distances`, which
- * holds one for every tile of the grid: its length on a grid of bools, infinite where no path reaches, and 0 at
- * the start, blocked or not.
+ * The cheapest path from tile `start` to every tile, by Dijkstra's algorithm: its cost into `costs` and its length
+ * into `distances`, each holding one for every tile of the grid; infinite where no path reaches, and 0 at the start,
+ * blocked or not. On a grid of bools the two are the same. Of several equally cheap paths to a tile, the length is
+ * one of theirs.
  */
-SearchStatus fill_distances(const Grid *grid, int start, double *distances);
+SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *distances);
 
 /*
  * The path that ends at `end`, allocated into `tiles` as (i, j) pairs, walking `parent` back from it to a tile whose

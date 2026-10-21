@@ -137,18 +137,25 @@ static PyObject *find_path(PyObject *module, PyObject *args) {
     return result;
 }
 
-static PyObject *distances_from(PyObject *module, PyObject *args) {
+static PyObject *flood_from(PyObject *module, PyObject *args) {
     (void)module;
-    PyObject *grid_object, *distances_object;
+    PyObject *grid_object, *costs_object, *distances_object;
     int start_i, start_j;
-    if (!PyArg_ParseTuple(args, "OiiO:distances_from", &grid_object, &start_i, &start_j, &distances_object)) {
+    if (!PyArg_ParseTuple(args, "OiiOO:flood_from", &grid_object, &start_i, &start_j, &costs_object,
+                          &distances_object)) {
         return NULL;
     }
-    Py_buffer grid_view, distances_view;
+    Py_buffer grid_view, costs_view, distances_view;
     Grid grid;
     if (read_grid(grid_object, &grid_view, &grid) < 0) return NULL;
+    Py_ssize_t tile_count = (Py_ssize_t)grid.width * grid.height;
     int start = tile_at(&grid, start_i, start_j, "start");
-    if (start < 0 || read_output(distances_object, &distances_view, (Py_ssize_t)grid.width * grid.height) < 0) {
+    if (start < 0 || read_output(costs_object, &costs_view, tile_count) < 0) {
+        PyBuffer_Release(&grid_view);
+        return NULL;
+    }
+    if (read_output(distances_object, &distances_view, tile_count) < 0) {
+        PyBuffer_Release(&costs_view);
         PyBuffer_Release(&grid_view);
         return NULL;
     }
@@ -157,10 +164,13 @@ static PyObject *distances_from(PyObject *module, PyObject *args) {
     SearchStatus status = SEARCH_DONE;
     Py_BEGIN_ALLOW_THREADS
     if (grid.costs) status = check_costs(&grid, &cheapest, &dearest, &bad_tile);
-    if (status == SEARCH_DONE) status = fill_distances(&grid, start, (double *)distances_view.buf);
+    if (status == SEARCH_DONE) {
+        status = fill_flood(&grid, start, (double *)costs_view.buf, (double *)distances_view.buf);
+    }
     Py_END_ALLOW_THREADS
     int failed = check_status(status, &grid, bad_tile);
     PyBuffer_Release(&distances_view);
+    PyBuffer_Release(&costs_view);
     PyBuffer_Release(&grid_view);
     if (failed) return NULL;
     Py_RETURN_NONE;
@@ -171,9 +181,10 @@ static PyMethodDef module_methods[] = {
      "find_path(grid, start_i, start_j, end_i, end_j, /)\n--\n\n"
      "The cheapest path's cost, its length and its tiles as C ints, i and j in turn, or None for the tiles if there "
      "is none. The grid is a buffer of bools, or of doubles, its costs."},
-    {"distances_from", distances_from, METH_VARARGS,
-     "distances_from(grid, start_i, start_j, distances, /)\n--\n\n"
-     "Write every tile's cost from the start into `distances`, its distance on a grid of bools."},
+    {"flood_from", flood_from, METH_VARARGS,
+     "flood_from(grid, start_i, start_j, costs, distances, /)\n--\n\n"
+     "Write the cost of the cheapest path from the start to every tile into `costs`, and its length into "
+     "`distances`."},
     {NULL, NULL, 0, NULL},
 };
 

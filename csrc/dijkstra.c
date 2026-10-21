@@ -1,4 +1,4 @@
-/* Every tile's distance from one, or its cost on a grid of costs, by Dijkstra's algorithm. */
+/* The cheapest path from one tile to every tile, by Dijkstra's algorithm: each path's cost and its length. */
 
 #include <math.h>
 #include <stdint.h>
@@ -7,11 +7,11 @@
 #include "heap.h"
 #include "search.h"
 
-SearchStatus fill_distances(const Grid *grid, int start, double *distances) {
+SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *distances) {
     int height = grid->height;
     size_t tile_count = (size_t)grid->width * (size_t)height;
-    for (size_t tile = 0; tile < tile_count; tile++) distances[tile] = INFINITY;
-    distances[start] = 0.0;
+    for (size_t tile = 0; tile < tile_count; tile++) costs[tile] = distances[tile] = INFINITY;
+    costs[start] = distances[start] = 0.0;
     if (!is_passable(grid, start / height, start % height)) return SEARCH_DONE;
 
     uint8_t *settled = calloc(tile_count, 1);
@@ -32,10 +32,11 @@ SearchStatus fill_distances(const Grid *grid, int start, double *distances) {
             if (!can_step(grid, i, j, di, dj)) continue;
             int neighbor = tile + di * height + dj;
             if (settled[neighbor]) continue;
-            double distance = distances[tile] + step_cost(grid, tile, di, dj);
-            if (distance < distances[neighbor]) {
-                distances[neighbor] = distance;
-                if (heap_push(&heap, distance, neighbor)) {
+            double cost = costs[tile] + step_cost(grid, tile, di, dj);
+            if (cost < costs[neighbor]) {
+                costs[neighbor] = cost;
+                distances[neighbor] = distances[tile] + (di && dj ? SQRT_2 : 1.0);
+                if (heap_push(&heap, cost, neighbor)) {
                     status = SEARCH_OUT_OF_MEMORY;
                     goto done;
                 }
