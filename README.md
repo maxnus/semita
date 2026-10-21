@@ -59,7 +59,7 @@ Publish a GitHub release tagged `v` and the new version, such as `v0.2.0`. The v
 setuptools-scm reads from git; no file holds it.
 
 The `release` workflow then builds the sdist, builds from it a wheel for Linux x86_64 and aarch64, Windows AMD64 and
-macOS arm64 and x86_64, tests each, checks that the wheels use the stable ABI alone and that the tag is a version,
+macOS arm64 and x86_64, tests and audits each for the stable ABI alone, checks that the tag is a version,
 and uploads them to PyPI. Every pull request builds and checks the same files without uploading them.
 
 PyPI trusts the workflow through trusted publishing, from the repository's `pypi` environment, so no token is stored
