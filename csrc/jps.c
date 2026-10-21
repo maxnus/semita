@@ -14,6 +14,10 @@
 #define NO_TILE (-1)
 #define FROM_THE_START (-1)
 
+/* What a search knows of a tile: nothing yet, a cost to it that may still fall, or its final cost. A tile's cost,
+   parent and arrival are read only once it is reached, so the search never fills them for the whole grid. */
+enum { UNREACHED = 0, REACHED = 1, SETTLED = 2 };
+
 /* The length of a shortest path between two tiles with nothing in the way: the A* heuristic, and the exact length of
    the straight or diagonal run between two jump points. */
 static inline double octile_distance(int i, int j, int other_i, int other_j) {
@@ -90,9 +94,9 @@ static int directions_from(const Grid *grid, int i, int j, int arrival, int step
     return count;
 }
 
-/* Write the path that ends at `end` into `tiles`, walking `parent` back from it between jump points, each pair on
-   one straight or diagonal run. */
-static SearchStatus write_path(const Grid *grid, int end, const int *parent, int *tiles, int *tile_count) {
+/* The path that ends at `end`, allocated into `tiles` as (i, j) pairs, walking `parent` back from it between jump
+   points, each pair on one straight or diagonal run. */
+static SearchStatus write_path(const Grid *grid, int end, const int *parent, int **tiles, int *tile_count) {
     int height = grid->height;
     long long count = 1;
     for (int tile = end; parent[tile] != NO_TILE; tile = parent[tile]) {
@@ -101,10 +105,12 @@ static SearchStatus write_path(const Grid *grid, int end, const int *parent, int
         count += di > dj ? di : dj;
     }
     if (count > (long long)grid->width * height) return SEARCH_BROKEN;
+    int *path = malloc(2 * (size_t)count * sizeof *path);
+    if (!path) return SEARCH_OUT_OF_MEMORY;
     int position = (int)count - 1;
     int i = end / height, j = end % height;
-    tiles[2 * position] = i;
-    tiles[2 * position + 1] = j;
+    path[2 * position] = i;
+    path[2 * position + 1] = j;
     for (int tile = end; parent[tile] != NO_TILE; tile = parent[tile]) {
         int from_i = parent[tile] / height, from_j = parent[tile] % height;
         int back_i = (from_i > i) - (from_i < i), back_j = (from_j > j) - (from_j < j);
@@ -112,25 +118,33 @@ static SearchStatus write_path(const Grid *grid, int end, const int *parent, int
             i += back_i;
             j += back_j;
             position--;
-            tiles[2 * position] = i;
-            tiles[2 * position + 1] = j;
+            path[2 * position] = i;
+            path[2 * position + 1] = j;
         }
     }
-    if (position != 0) return SEARCH_BROKEN;
+    if (position != 0) {
+        free(path);
+        return SEARCH_BROKEN;
+    }
+    *tiles = path;
     *tile_count = (int)count;
     return SEARCH_DONE;
 }
 
 SearchStatus find_path_by_jump_points(
-    const Grid *grid, int start, int end, int *tiles, int *tile_count, double *distance
+    const Grid *grid, int start, int end, int **tiles, int *tile_count, double *distance
 ) {
     int height = grid->height;
     int end_i = end / height, end_j = end % height;
+    *tiles = NULL;
     *tile_count = 0;
     *distance = INFINITY;
     if (start == end) {
-        tiles[0] = end_i;
-        tiles[1] = end_j;
+        int *path = malloc(2 * sizeof *path);
+        if (!path) return SEARCH_OUT_OF_MEMORY;
+        path[0] = end_i;
+        path[1] = end_j;
+        *tiles = path;
         *tile_count = 1;
         *distance = 0.0;
         return SEARCH_DONE;
@@ -141,15 +155,14 @@ SearchStatus find_path_by_jump_points(
     double *cost = malloc(count * sizeof *cost);
     int *parent = malloc(count * sizeof *parent);
     int8_t *arrival = malloc(count * sizeof *arrival);
-    uint8_t *closed = calloc(count, 1);
+    uint8_t *state = calloc(count, 1);
     Heap heap = {0};
     SearchStatus status = SEARCH_DONE;
-    if (!cost || !parent || !arrival || !closed) {
+    if (!cost || !parent || !arrival || !state) {
         status = SEARCH_OUT_OF_MEMORY;
         goto done;
     }
-    /* A tile's parent and arrival are read only once its cost is set. */
-    for (size_t tile = 0; tile < count; tile++) cost[tile] = INFINITY;
+    state[start] = REACHED;
     cost[start] = 0.0;
     parent[start] = NO_TILE;
     arrival[start] = FROM_THE_START;
@@ -160,8 +173,8 @@ SearchStatus find_path_by_jump_points(
 
     while (heap.size > 0) {
         int tile = heap_pop(&heap).tile;
-        if (closed[tile]) continue;
-        closed[tile] = 1;
+        if (state[tile] == SETTLED) continue;
+        state[tile] = SETTLED;
         if (tile == end) {
             status = write_path(grid, end, parent, tiles, tile_count);
             if (status == SEARCH_DONE) *distance = cost[end];
@@ -174,10 +187,11 @@ SearchStatus find_path_by_jump_points(
             int step = steps[k], di = STEP_I[step], dj = STEP_J[step];
             int landing = di && dj ? jump_diagonal(grid, i, j, di, dj, end_i, end_j)
                                    : jump_straight(grid, i, j, di, dj, end_i, end_j);
-            if (landing == NO_TILE || closed[landing]) continue;
+            if (landing == NO_TILE || state[landing] == SETTLED) continue;
             int landing_i = landing / height, landing_j = landing % height;
             double landing_cost = cost[tile] + octile_distance(i, j, landing_i, landing_j);
-            if (landing_cost < cost[landing]) {
+            if (state[landing] == UNREACHED || landing_cost < cost[landing]) {
+                state[landing] = REACHED;
                 cost[landing] = landing_cost;
                 parent[landing] = tile;
                 arrival[landing] = (int8_t)step;
@@ -194,6 +208,6 @@ done:
     free(cost);
     free(parent);
     free(arrival);
-    free(closed);
+    free(state);
     return status;
 }

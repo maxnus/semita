@@ -7,6 +7,7 @@
 #include <Python.h>
 
 #include <limits.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "search.h"
@@ -71,12 +72,10 @@ static int check_status(SearchStatus status) {
 
 static PyObject *find_path(PyObject *module, PyObject *args) {
     (void)module;
-    PyObject *grid_object, *tiles_object;
+    PyObject *grid_object;
     int start_i, start_j, end_i, end_j;
-    if (!PyArg_ParseTuple(args, "OiiiiO:find_path", &grid_object, &start_i, &start_j, &end_i, &end_j, &tiles_object)) {
-        return NULL;
-    }
-    Py_buffer grid_view, tiles_view;
+    if (!PyArg_ParseTuple(args, "Oiiii:find_path", &grid_object, &start_i, &start_j, &end_i, &end_j)) return NULL;
+    Py_buffer grid_view;
     Grid grid;
     if (read_grid(grid_object, &grid_view, &grid) < 0) return NULL;
     int start = tile_at(&grid, start_i, start_j, "start");
@@ -85,21 +84,22 @@ static PyObject *find_path(PyObject *module, PyObject *args) {
         PyBuffer_Release(&grid_view);
         return NULL;
     }
-    Py_ssize_t pair_count = 2 * (Py_ssize_t)grid.width * grid.height;
-    if (read_output(tiles_object, &tiles_view, "i", (Py_ssize_t)sizeof(int), pair_count) < 0) {
-        PyBuffer_Release(&grid_view);
-        return NULL;
-    }
-    int tile_count;
+    int *tiles, tile_count;
     double distance;
     SearchStatus status;
     Py_BEGIN_ALLOW_THREADS
-    status = find_path_by_jump_points(&grid, start, end, (int *)tiles_view.buf, &tile_count, &distance);
+    status = find_path_by_jump_points(&grid, start, end, &tiles, &tile_count, &distance);
     Py_END_ALLOW_THREADS
-    PyBuffer_Release(&tiles_view);
     PyBuffer_Release(&grid_view);
     if (check_status(status) < 0) return NULL;
-    return Py_BuildValue("(di)", distance, tile_count);
+    if (!tiles) return Py_BuildValue("(dO)", distance, Py_None);
+    Py_ssize_t size = 2 * (Py_ssize_t)tile_count * (Py_ssize_t)sizeof *tiles;
+    PyObject *path = PyBytes_FromStringAndSize((const char *)tiles, size);
+    free(tiles);
+    if (!path) return NULL;
+    PyObject *result = Py_BuildValue("(dO)", distance, path);
+    Py_DECREF(path);
+    return result;
 }
 
 static PyObject *distances_from(PyObject *module, PyObject *args) {
@@ -132,10 +132,10 @@ static PyObject *distances_from(PyObject *module, PyObject *args) {
     Py_RETURN_NONE;
 }
 
-static PyMethodDef methods[] = {
+static PyMethodDef module_methods[] = {
     {"find_path", find_path, METH_VARARGS,
-     "find_path(passable, start_i, start_j, end_i, end_j, tiles, /)\n--\n\n"
-     "Write a shortest path's tiles into `tiles` and return its length and its number of tiles, 0 if there is none."},
+     "find_path(passable, start_i, start_j, end_i, end_j, /)\n--\n\n"
+     "A shortest path's length and its tiles as C ints, i and j in turn, or None for the tiles if there is none."},
     {"distances_from", distances_from, METH_VARARGS,
      "distances_from(passable, start_i, start_j, distances, /)\n--\n\n"
      "Write every tile's distance from the start into `distances`."},
@@ -143,7 +143,7 @@ static PyMethodDef methods[] = {
 };
 
 static struct PyModuleDef module_definition = {
-    PyModuleDef_HEAD_INIT, "semita._search", "semita's searches, in C.", -1, methods, NULL, NULL, NULL, NULL,
+    PyModuleDef_HEAD_INIT, "semita._search", "semita's searches, in C.", -1, module_methods, NULL, NULL, NULL, NULL,
 };
 
 PyMODINIT_FUNC PyInit__search(void) {

@@ -14,7 +14,7 @@ import semita
 from semita import _search
 
 # Each step to a neighbor, across, up or diagonally, with its length; the steps back are the same undirected edges.
-_STEPS = ((1, 0, 1.0), (0, 1, 1.0), (1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)))
+_NEIGHBOR_STEPS = ((1, 0, 1.0), (0, 1, 1.0), (1, 1, math.sqrt(2)), (1, -1, math.sqrt(2)))
 
 
 def _shortest_distances(passable: NDArray[numpy.bool_], start: tuple[int, int]) -> NDArray[numpy.float64]:
@@ -22,7 +22,7 @@ def _shortest_distances(passable: NDArray[numpy.bool_], start: tuple[int, int]) 
     width, height = passable.shape
     tiles = numpy.arange(width * height).reshape(width, height)
     sources, targets, lengths = [], [], []
-    for di, dj, length in _STEPS:
+    for di, dj, length in _NEIGHBOR_STEPS:
         from_is, to_is = slice(0, width - di), slice(di, width)
         if dj >= 0:
             from_js, to_js = slice(0, height - dj), slice(dj, height)
@@ -59,7 +59,7 @@ def _walled_grid(seed: int) -> NDArray[numpy.bool_]:
     return passable
 
 
-_GRIDS = {
+_TEST_GRIDS = {
     "open": numpy.ones((40, 30), dtype=bool),
     "a row": _random_grid(1, 50, 0.1, 1),
     "a column": _random_grid(50, 1, 0.1, 2),
@@ -76,9 +76,9 @@ def _tiles_of(passable: NDArray[numpy.bool_], count: int, seed: int) -> list[tup
     return random.Random(seed).choices(open_tiles, k=count)
 
 
-@pytest.mark.parametrize("name", list(_GRIDS))
+@pytest.mark.parametrize("name", list(_TEST_GRIDS))
 def test_every_distance_is_the_shortest_paths(name: str) -> None:
-    passable = _GRIDS[name]
+    passable = _TEST_GRIDS[name]
     for start in _tiles_of(passable, 5, seed=11):
         found = semita.distances_from(passable, start)
         expected = _shortest_distances(passable, start)
@@ -89,9 +89,9 @@ def test_every_distance_is_the_shortest_paths(name: str) -> None:
         assert numpy.abs(found[reachable] - expected[reachable]).max() < 1e-9
 
 
-@pytest.mark.parametrize("name", list(_GRIDS))
+@pytest.mark.parametrize("name", list(_TEST_GRIDS))
 def test_a_path_is_a_shortest_one_of_legal_steps(name: str) -> None:
-    passable = _GRIDS[name]
+    passable = _TEST_GRIDS[name]
     starts, ends = _tiles_of(passable, 40, seed=12), _tiles_of(passable, 40, seed=13)
     for start, end in zip(starts, ends, strict=True):
         expected = _shortest_distances(passable, start)[end]
@@ -149,7 +149,7 @@ def test_a_byte_grid_is_passable_where_nonzero() -> None:
 
 
 def test_a_grid_that_is_not_c_contiguous_is_read_by_its_indices() -> None:
-    passable = _GRIDS["dense"]
+    passable = _TEST_GRIDS["dense"]
     transposed = numpy.ascontiguousarray(passable.T).T
     assert not transposed.flags.c_contiguous
     start, end = _tiles_of(passable, 2, seed=14)
@@ -186,8 +186,8 @@ def test_the_c_module_checks_the_buffers_it_is_handed() -> None:
     passable = numpy.ones((3, 3), dtype=bool)
     with pytest.raises(TypeError, match="9 items of format 'd'"):
         _search.distances_from(passable, 0, 0, numpy.empty(8))
-    with pytest.raises(TypeError, match="items of format 'i'"):
-        _search.find_path(passable, 0, 0, 2, 2, numpy.empty((9, 2), dtype=numpy.int64))
+    with pytest.raises(TypeError, match="items of format 'd'"):
+        _search.distances_from(passable, 0, 0, numpy.empty(9, dtype=numpy.float32))
     with pytest.raises(TypeError, match="2-D C-contiguous buffer of bool or uint8"):
         _search.distances_from(numpy.ones((3, 3)), 0, 0, numpy.empty(9))
     with pytest.raises(IndexError, match="the start"):
@@ -195,17 +195,18 @@ def test_the_c_module_checks_the_buffers_it_is_handed() -> None:
 
 
 def test_searches_on_threads_at_once_find_what_they_find_one_at_a_time() -> None:
-    grids = [_GRIDS["dense"], _GRIDS["rooms"], _GRIDS["mazelike"]]
+    grids = [_TEST_GRIDS["dense"], _TEST_GRIDS["rooms"], _TEST_GRIDS["mazelike"]]
     jobs = []
     for seed in range(600):
         passable = grids[seed % len(grids)]
         start, end = _tiles_of(passable, 2, seed=seed)
         jobs.append((passable, start, end))
 
-    def search(job: tuple[NDArray[numpy.bool_], tuple[int, int], tuple[int, int]]) -> tuple[float, list[list[int]]]:
+    def search(job: tuple[NDArray[numpy.bool_], tuple[int, int], tuple[int, int]]) -> tuple[object, ...]:
+        """All a search finds, whole: a flood's sum would read inf wherever a tile is blocked."""
         path = semita.find_path(*job)
-        distances = semita.distances_from(job[0], job[1])
-        return (math.inf, []) if path is None else (path.distance + float(distances.sum()), path.tiles.tolist())
+        distances = semita.distances_from(job[0], job[1]).tolist()
+        return (None, distances) if path is None else (path.distance, path.tiles.tolist(), distances)
 
     one_at_a_time = [search(job) for job in jobs]
     with ThreadPoolExecutor(8) as pool:

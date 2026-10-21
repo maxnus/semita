@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "semita"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Shortest paths and distances on a grid, in C, for Python"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,6 +27,9 @@ dev = ["pytest>=8.3", "scipy>=1.14", "ruff>=0.8", "pyright>=1.1.390", "setuptool
 
 [project.urls]
 Repository = "https://github.com/maxnus/semita"
+
+[tool.setuptools.dynamic]
+version = { attr = "semita.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -27,12 +27,12 @@ typedef enum {
 } SearchStatus;
 
 /*
- * A shortest path from tile `start` to tile `end`, by jump point search: its tiles as (i, j) pairs into `tiles`,
- * which holds a pair for every tile of the grid, their number into `tile_count` and its length into `distance`. The
- * start alone is a path to itself, blocked or not. Where no path exists, `tile_count` is 0 and `distance` infinite.
+ * A shortest path from tile `start` to tile `end`, by jump point search: its tiles as (i, j) pairs, allocated into
+ * `tiles` for the caller to free, their number into `tile_count` and its length into `distance`. The start alone is a
+ * path to itself, blocked or not. Where no path exists, `tiles` is NULL, `tile_count` 0 and `distance` infinite.
  */
 SearchStatus find_path_by_jump_points(
-    const Grid *grid, int start, int end, int *tiles, int *tile_count, double *distance
+    const Grid *grid, int start, int end, int **tiles, int *tile_count, double *distance
 );
 
 /*

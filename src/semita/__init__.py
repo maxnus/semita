@@ -18,6 +18,7 @@ from numpy.typing import ArrayLike, NDArray
 from semita import _search
 
 __all__ = ["Path", "distances_from", "find_path"]
+# pyproject.toml reads the version from here.
 __version__ = "0.1.0"
 
 
@@ -39,15 +40,13 @@ def find_path(passable: ArrayLike, start: tuple[int, int], end: tuple[int, int])
     `TypeError` for one that is neither bool nor uint8.
     """
     grid = _as_grid(passable)
-    start_i, start_j = _tile(grid, start, "start")
-    end_i, end_j = _tile(grid, end, "end")
-    tiles = numpy.empty((grid.size, 2), dtype=numpy.intc)
-    distance, tile_count = _search.find_path(grid, start_i, start_j, end_i, end_j, tiles)
-    if tile_count == 0:
+    start_i, start_j = _checked_tile(grid, start, "start")
+    end_i, end_j = _checked_tile(grid, end, "end")
+    distance, tiles = _search.find_path(grid, start_i, start_j, end_i, end_j)
+    if tiles is None:
         return None
-    path_tiles = tiles[:tile_count].copy()
-    path_tiles.flags.writeable = False
-    return Path(distance, path_tiles)
+    # An array over bytes is read-only.
+    return Path(distance, numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2))
 
 
 def distances_from(passable: ArrayLike, start: tuple[int, int]) -> NDArray[numpy.float64]:
@@ -57,7 +56,7 @@ def distances_from(passable: ArrayLike, start: tuple[int, int]) -> NDArray[numpy
     Raises as `find_path` does.
     """
     grid = _as_grid(passable)
-    start_i, start_j = _tile(grid, start, "start")
+    start_i, start_j = _checked_tile(grid, start, "start")
     distances = numpy.empty(grid.shape, dtype=numpy.float64)
     _search.distances_from(grid, start_i, start_j, distances)
     return distances
@@ -73,7 +72,9 @@ def _as_grid(passable: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.uint8]
     return numpy.ascontiguousarray(grid)
 
 
-def _tile(grid: NDArray[numpy.bool_] | NDArray[numpy.uint8], tile: tuple[int, int], which: str) -> tuple[int, int]:
+def _checked_tile(
+    grid: NDArray[numpy.bool_] | NDArray[numpy.uint8], tile: tuple[int, int], which: str
+) -> tuple[int, int]:
     """`tile` as two ints, raising `IndexError` if the grid has no such tile; a negative index counts as outside."""
     i, j = (index(coordinate) for coordinate in tile)
     width, height = grid.shape
