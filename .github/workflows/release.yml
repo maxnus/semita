@@ -1,0 +1,117 @@
+name: release
+
+# A published GitHub release, tagged `v` and semita's version, builds every wheel and the sdist and uploads them to
+# PyPI. A pull request builds and checks the same files without uploading them.
+on:
+  pull_request:
+  release:
+    types: [published]
+
+# Every job reads the repository at most; `publish` adds the identity PyPI trusts.
+permissions:
+  contents: read
+
+jobs:
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version is the tag, which setuptools-scm reads from git.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: uv build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  wheels:
+    # Every wheel is built from the sdist, so it carries the sdist's version and needs no git history.
+    needs: sdist
+    name: wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each wheel is built and tested on its own architecture: Linux x86_64 and aarch64, Windows AMD64, and macOS
+        # arm64 and x86_64. pyproject.toml's [tool.cibuildwheel] says what is built and how it is tested.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: sdist
+
+      - name: Find the sdist
+        id: sdist
+        shell: bash
+        run: echo "path=$(ls sdist/semita-*.tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        uses: pypa/cibuildwheel@v4.2.1
+        with:
+          package-dir: ${{ steps.sdist.outputs.path }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  check:
+    # What would be uploaded: wheels on the stable ABI alone, and, for a release, the tag's version.
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: List the files
+        run: ls -l dist
+
+      - name: The stable ABI alone
+        run: uvx abi3audit@0.0.26 --strict --summary dist/*.whl
+
+      - name: The tag is v and a version
+        if: github.event_name == 'release'
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [[ "$tag" != v* ]]; then
+            echo "A release's tag is v and its version, such as v0.2.0, not $tag"
+            exit 1
+          fi
+          if [ ! -f "dist/semita-${tag#v}.tar.gz" ]; then
+            echo "setuptools-scm did not read $tag as semita's version, and built $(ls dist)"
+            exit 1
+          fi
+
+  publish:
+    if: github.event_name == 'release'
+    needs: check
+    runs-on: ubuntu-latest
+    # PyPI trusts this workflow from this environment alone, so no token is stored anywhere.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/semita/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2

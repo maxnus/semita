@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,18 +28,39 @@ dev = ["pytest>=8.3", "scipy>=1.14", "ruff>=0.8", "pyright>=1.1.390", "setuptool
 [project.urls]
 Repository = "https://github.com/maxnus/semita"
 
-[tool.setuptools.dynamic]
-version = { attr = "semita.__version__" }
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 semita = ["py.typed", "*.pyi"]
 
+[tool.setuptools_scm]
+# The version is the git tag; a release is made by tagging, never by editing a file. Between tags it reads like
+# 0.1.1.dev3+g1a2b3c4, and without git history, 0.0.0.
+version_file = "src/semita/_version.py"
+fallback_version = "0.0.0"
+
+[tool.cibuildwheel]
+# One wheel on the stable ABI serves every Python from 3.12, so only 3.12 is built, for the runner's own
+# architecture, with the compiler's warnings as errors. musllinux is left out.
+build = "cp312-*"
+skip = "*-musllinux_*"
+archs = ["native"]
+environment = { SEMITA_WARNINGS_AS_ERRORS = "1" }
+test-requires = ["pytest", "scipy"]
+# The wheels are built from the sdist, and the tests run from what it holds.
+test-sources = ["tests", "README.md"]
+test-command = "pytest tests"
+
 [tool.uv]
-# uv rebuilds the package only when one of these changes; by default that is only pyproject.toml.
-cache-keys = [{ file = "pyproject.toml" }, { file = "setup.py" }, { file = "csrc/*" }]
+# uv rebuilds the package only when one of these changes; by default that is only pyproject.toml. The commit and
+# the tags are among them so that `semita.__version__` follows git.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "setup.py" },
+    { file = "csrc/*" },
+    { git = { commit = true, tags = true } },
+]
 
 [tool.ruff]
 line-length = 120

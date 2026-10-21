@@ -16,10 +16,9 @@ import numpy
 from numpy.typing import ArrayLike, NDArray
 
 from semita import _search
+from semita._version import __version__
 
-__all__ = ["Path", "distances_from", "find_path"]
-# pyproject.toml reads the version from here.
-__version__ = "0.1.0"
+__all__ = ["Path", "__version__", "distances_from", "find_path"]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
