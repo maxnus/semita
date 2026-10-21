@@ -5,7 +5,7 @@ import os
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 
-SOURCES = ["csrc/module.c", "csrc/jps.c", "csrc/dijkstra.c"]
+SOURCES = ["csrc/module.c", "csrc/jps.c", "csrc/astar.c", "csrc/dijkstra.c", "csrc/costs.c", "csrc/path.c"]
 HEADERS = ["csrc/search.h", "csrc/heap.h"]
 
 

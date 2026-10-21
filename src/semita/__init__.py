@@ -1,16 +1,26 @@
-"""Shortest paths and distances on a grid.
+"""Shortest and cheapest paths and distances on a grid.
 
-A grid is a 2-D array of bools or numbers, passable where nonzero, NaN included, and indexed `[i, j]`. Bools and
-uint8 are read as they are; a grid of any other number is converted on each call. A step goes to one of the eight
-neighboring tiles, 1 long straight and sqrt(2) diagonally, and only between passable tiles; a diagonal step needs
-both tiles beside it passable too, so no path cuts a corner. The start is a path to itself, 0 long, even on a blocked
-tile, but no step leaves or enters a blocked one.
+A grid is a 2-D array, indexed `[i, j]`, whose values are the tiles' costs: the cost of moving one unit of distance
+across each, 1 for normal ground, less where movement is faster, more where it is slower or best avoided. 0 and `inf`
+block a tile. A grid of bools is the simplest: `True` costs 1 and `False` blocks. A cost is otherwise positive; NaN
+and negatives raise `ValueError`.
+
+A step goes to one of the eight neighboring tiles, 1 long straight and sqrt(2) diagonally, and only between passable
+tiles; a diagonal step needs both tiles beside it passable too, so no path cuts a corner. A step costs its length
+times the mean of the costs of the two tiles it joins, so a path costs the same both ways. The start is a path to
+itself, costing nothing, even on a blocked tile, but no step leaves or enters a blocked one.
+
+A grid whose passable tiles all cost the same, a grid of bools included, is searched by jump point search; any other
+by A*, which visits more tiles, the more so the cheaper the cheapest tile is, since its estimate of what is left is
+the straight distance times that cost. A grid of bools, or a C-contiguous one of float64, is read as it is; any
+other is converted on each call.
 
 Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid must not be
 written to while a search reads it.
 """
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from operator import index
 
 import numpy
@@ -19,66 +29,97 @@ from numpy.typing import ArrayLike, NDArray
 from semita import _search
 from semita._version import __version__
 
-__all__ = ["Path", "__version__", "distances_from", "find_path"]
+__all__ = ["CheapestPaths", "Path", "__version__", "cheapest_paths_from", "find_path"]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
 class Path:
-    """A shortest path between two tiles."""
+    """A cheapest path between two tiles, which on a grid of bools is a shortest one."""
 
     distance: float
     """Its length, the sum of its steps."""
+    cost: float
+    """What it costs, the sum of its steps' costs: its `distance` on a grid of bools."""
     tiles: NDArray[numpy.intc]
     """Its tiles in order, the start and the end included, as rows `(i, j)`; read-only."""
 
 
-def find_path(passable: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> Path | None:
-    """A shortest path from `start` to `end` over the `passable` tiles, by jump point search, or `None` if there is
-    none. Of several equally short paths it is one, but which is not part of the contract.
+@dataclass(frozen=True, slots=True, eq=False)
+class CheapestPaths:
+    """The cheapest path from one tile to every tile of a grid, which on a grid of bools is a shortest one; of
+    several equally cheap paths to a tile, one of them."""
 
-    Raises `IndexError` for a start or an end outside the grid, `ValueError` for an array that is not 2-D, and
-    `TypeError` for one that holds neither bools nor numbers.
+    costs: NDArray[numpy.float64]
+    """Each tile's cheapest path's cost, in a read-only array of the grid's shape: `inf` where no path reaches."""
+    distances: NDArray[numpy.float64]
+    """Each tile's cheapest path's length, in a read-only array of the grid's shape: `inf` where no path reaches,
+    and `costs` on a grid of bools."""
+    _parents: NDArray[numpy.intc] = field(repr=False)
+    """The tile each tile's cheapest path arrives from, as an index into the grid; read only where `costs` is
+    finite."""
+
+    def path_to(self, end: tuple[int, int]) -> Path | None:
+        """The cheapest path to `end`, whose cost and length are `costs` and `distances` there, or `None` if no path
+        reaches it.
+
+        Raises `IndexError` for an end outside the grid.
+        """
+        end_i, end_j = _checked_tile(self.costs, end, "end")
+        if math.isinf(self.costs[end_i, end_j]):
+            return None
+        tiles = _search.walk_back(self._parents, end_i, end_j)
+        # An array over bytes is read-only.
+        tile_array = numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2)
+        return Path(float(self.distances[end_i, end_j]), float(self.costs[end_i, end_j]), tile_array)
+
+
+def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> Path | None:
+    """A cheapest path from `start` to `end` over the `grid`, or `None` if there is none. Of several equally cheap paths
+    it is one, but which is not part of the contract.
+
+    Raises `IndexError` for a start or an end outside the grid; `ValueError` for an array that is not 2-D, or a tile
+    whose cost is negative or NaN; and `TypeError` for one that holds neither bools nor real numbers.
     """
-    grid = _as_grid(passable)
-    start_i, start_j = _checked_tile(grid, start, "start")
-    end_i, end_j = _checked_tile(grid, end, "end")
-    distance, tiles = _search.find_path(grid, start_i, start_j, end_i, end_j)
+    tiles_grid = _as_grid(grid)
+    start_i, start_j = _checked_tile(tiles_grid, start, "start")
+    end_i, end_j = _checked_tile(tiles_grid, end, "end")
+    cost, distance, tiles = _search.find_path(tiles_grid, start_i, start_j, end_i, end_j)
     if tiles is None:
         return None
     # An array over bytes is read-only.
-    return Path(distance, numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2))
+    return Path(distance, cost, numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2))
 
 
-def distances_from(passable: ArrayLike, start: tuple[int, int]) -> NDArray[numpy.float64]:
-    """The length of a shortest path from `start` to each tile over the `passable` tiles, by Dijkstra's algorithm,
-    in an array of the grid's shape: `inf` where no path reaches.
+def cheapest_paths_from(grid: ArrayLike, start: tuple[int, int]) -> CheapestPaths:
+    """The cheapest path from `start` to every tile over the `grid`, by Dijkstra's algorithm, in one pass: each one's
+    cost and length, and `path_to` for its tiles.
 
     Raises as `find_path` does.
     """
-    grid = _as_grid(passable)
-    start_i, start_j = _checked_tile(grid, start, "start")
-    distances = numpy.empty(grid.shape, dtype=numpy.float64)
-    _search.distances_from(grid, start_i, start_j, distances)
-    return distances
+    tiles_grid = _as_grid(grid)
+    start_i, start_j = _checked_tile(tiles_grid, start, "start")
+    costs = numpy.empty(tiles_grid.shape, dtype=numpy.float64)
+    distances = numpy.empty(tiles_grid.shape, dtype=numpy.float64)
+    parents = numpy.empty(tiles_grid.shape, dtype=numpy.intc)
+    _search.cheapest_paths_from(tiles_grid, start_i, start_j, costs, distances, parents)
+    costs.flags.writeable = distances.flags.writeable = False
+    return CheapestPaths(costs, distances, parents)
 
 
-def _as_grid(passable: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.uint8]:
-    """`passable` as a C-contiguous array of bools or bytes: one of bools or bytes as it is, copied only if it is not
-    C-contiguous, and one of any other number as bools, true where nonzero."""
-    grid = numpy.asarray(passable)
-    if grid.ndim != 2:
-        raise ValueError(f"a grid is two-dimensional, got {grid.ndim} dimensions")
-    if grid.dtype == numpy.bool_ or grid.dtype == numpy.uint8:
-        return numpy.ascontiguousarray(grid)
-    if not numpy.issubdtype(grid.dtype, numpy.number):
-        raise TypeError(f"a grid holds bools or numbers, got {grid.dtype}")
-    # Compared straight into a C-ordered array: one copy, whatever the grid's own order.
-    return numpy.not_equal(grid, 0, order="C")
+def _as_grid(grid: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.float64]:
+    """`grid` as a C-contiguous array of bools, or of doubles, its costs: one of bools or of doubles as it is, copied
+    only if it is not C-contiguous, and one of any other real number converted to doubles."""
+    array = numpy.asarray(grid)
+    if array.ndim != 2:
+        raise ValueError(f"a grid is two-dimensional, got {array.ndim} dimensions")
+    if array.dtype == numpy.bool_:
+        return numpy.ascontiguousarray(array)
+    if not (numpy.issubdtype(array.dtype, numpy.integer) or numpy.issubdtype(array.dtype, numpy.floating)):
+        raise TypeError(f"a grid holds bools or real numbers, got {array.dtype}")
+    return numpy.ascontiguousarray(array, dtype=numpy.float64)
 
 
-def _checked_tile(
-    grid: NDArray[numpy.bool_] | NDArray[numpy.uint8], tile: tuple[int, int], which: str
-) -> tuple[int, int]:
+def _checked_tile(grid: NDArray[numpy.generic], tile: tuple[int, int], which: str) -> tuple[int, int]:
     """`tile` as two ints, raising `IndexError` if the grid has no such tile; a negative index counts as outside."""
     i, j = (index(coordinate) for coordinate in tile)
     width, height = grid.shape
