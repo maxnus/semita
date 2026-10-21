@@ -1,6 +1,7 @@
 """Shortest paths and distances on a grid.
 
-A grid is a 2-D array of bools, or of bytes passable where nonzero, indexed `[i, j]`. A step goes to one of the eight
+A grid is a 2-D array of bools or numbers, passable where nonzero, NaN included, and indexed `[i, j]`. Bools and
+uint8 are read as they are; a grid of any other number is converted on each call. A step goes to one of the eight
 neighboring tiles, 1 long straight and sqrt(2) diagonally, and only between passable tiles; a diagonal step needs
 both tiles beside it passable too, so no path cuts a corner. The start is a path to itself, 0 long, even on a blocked
 tile, but no step leaves or enters a blocked one.
@@ -36,7 +37,7 @@ def find_path(passable: ArrayLike, start: tuple[int, int], end: tuple[int, int])
     none. Of several equally short paths it is one, but which is not part of the contract.
 
     Raises `IndexError` for a start or an end outside the grid, `ValueError` for an array that is not 2-D, and
-    `TypeError` for one that is neither bool nor uint8.
+    `TypeError` for one that holds neither bools nor numbers.
     """
     grid = _as_grid(passable)
     start_i, start_j = _checked_tile(grid, start, "start")
@@ -62,13 +63,16 @@ def distances_from(passable: ArrayLike, start: tuple[int, int]) -> NDArray[numpy
 
 
 def _as_grid(passable: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.uint8]:
-    """`passable` as a C-contiguous array of bools or bytes, copied only if it is not one already."""
+    """`passable` as a C-contiguous array of bools or bytes: one of bools or bytes as it is, copied only if it is not
+    C-contiguous, and one of any other number as bools, true where nonzero."""
     grid = numpy.asarray(passable)
     if grid.ndim != 2:
         raise ValueError(f"a grid is two-dimensional, got {grid.ndim} dimensions")
-    if grid.dtype != numpy.bool_ and grid.dtype != numpy.uint8:
-        raise TypeError(f"a grid holds bool or uint8, got {grid.dtype}")
-    return numpy.ascontiguousarray(grid)
+    if grid.dtype == numpy.bool_ or grid.dtype == numpy.uint8:
+        return numpy.ascontiguousarray(grid)
+    if not numpy.issubdtype(grid.dtype, numpy.number):
+        raise TypeError(f"a grid holds bools or numbers, got {grid.dtype}")
+    return numpy.ascontiguousarray(grid != 0)
 
 
 def _checked_tile(
