@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "semita"
+version = "0.1.0"
+description = "Shortest paths and distances on a grid, in C, for Python"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Max Nusspickel", email = "max.nusspickel@gmail.com" }]
+keywords = ["pathfinding", "jump point search", "dijkstra", "grid"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
+dependencies = ["numpy>=2.1"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "scipy>=1.14", "ruff>=0.8", "pyright>=1.1.390", "setuptools>=77"]
+
+[project.urls]
+Repository = "https://github.com/maxnus/semita"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+semita = ["py.typed", "*.pyi"]
+
+[tool.uv]
+# uv rebuilds the package only when one of these changes; by default that is only pyproject.toml.
+cache-keys = [{ file = "pyproject.toml" }, { file = "setup.py" }, { file = "csrc/*" }]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["src", "tests", "setup.py"]
+pythonVersion = "3.12"
