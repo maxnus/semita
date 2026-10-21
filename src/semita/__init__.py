@@ -72,7 +72,8 @@ def _as_grid(passable: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.uint8]
         return numpy.ascontiguousarray(grid)
     if not numpy.issubdtype(grid.dtype, numpy.number):
         raise TypeError(f"a grid holds bools or numbers, got {grid.dtype}")
-    return numpy.ascontiguousarray(grid != 0)
+    # Compared straight into a C-ordered array: one copy, whatever the grid's own order.
+    return numpy.not_equal(grid, 0, order="C")
 
 
 def _checked_tile(
