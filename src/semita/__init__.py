@@ -19,7 +19,8 @@ Each search allocates its own memory and releases the GIL, so searches run in pa
 written to while a search reads it.
 """
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from operator import index
 
 import numpy
@@ -28,7 +29,7 @@ from numpy.typing import ArrayLike, NDArray
 from semita import _search
 from semita._version import __version__
 
-__all__ = ["Flood", "Path", "__version__", "find_path", "flood_from"]
+__all__ = ["CheapestPaths", "Path", "__version__", "cheapest_paths_from", "find_path"]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -44,14 +45,32 @@ class Path:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class Flood:
-    """The cheapest path from one tile to every tile of a grid, which on a grid of bools is a shortest one."""
+class CheapestPaths:
+    """The cheapest path from one tile to every tile of a grid, which on a grid of bools is a shortest one; of
+    several equally cheap paths to a tile, one of them."""
 
     costs: NDArray[numpy.float64]
-    """Each tile's cheapest path's cost, in an array of the grid's shape: `inf` where no path reaches."""
+    """Each tile's cheapest path's cost, in a read-only array of the grid's shape: `inf` where no path reaches."""
     distances: NDArray[numpy.float64]
-    """The length of each tile's cheapest path, of one of them if several cost the same: `inf` where no path
-    reaches, and `costs` on a grid of bools."""
+    """Each tile's cheapest path's length, in a read-only array of the grid's shape: `inf` where no path reaches,
+    and `costs` on a grid of bools."""
+    _parents: NDArray[numpy.intc] = field(repr=False)
+    """The tile each tile's cheapest path arrives from, as an index into the grid; read only where `costs` is
+    finite."""
+
+    def path_to(self, end: tuple[int, int]) -> Path | None:
+        """The cheapest path to `end`, whose cost and length are `costs` and `distances` there, or `None` if no path
+        reaches it.
+
+        Raises `IndexError` for an end outside the grid.
+        """
+        end_i, end_j = _checked_tile(self.costs, end, "end")
+        if math.isinf(self.costs[end_i, end_j]):
+            return None
+        tiles = _search.walk_back(self._parents, end_i, end_j)
+        # An array over bytes is read-only.
+        tile_array = numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2)
+        return Path(float(self.distances[end_i, end_j]), float(self.costs[end_i, end_j]), tile_array)
 
 
 def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> Path | None:
@@ -71,9 +90,9 @@ def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> 
     return Path(distance, cost, numpy.frombuffer(tiles, dtype=numpy.intc).reshape(-1, 2))
 
 
-def flood_from(grid: ArrayLike, start: tuple[int, int]) -> Flood:
-    """The cheapest path from `start` to each tile over the `grid`, by Dijkstra's algorithm: its cost and its length,
-    found in the one pass.
+def cheapest_paths_from(grid: ArrayLike, start: tuple[int, int]) -> CheapestPaths:
+    """The cheapest path from `start` to every tile over the `grid`, by Dijkstra's algorithm, in one pass: each one's
+    cost and length, and `path_to` for its tiles.
 
     Raises as `find_path` does.
     """
@@ -81,8 +100,10 @@ def flood_from(grid: ArrayLike, start: tuple[int, int]) -> Flood:
     start_i, start_j = _checked_tile(tiles_grid, start, "start")
     costs = numpy.empty(tiles_grid.shape, dtype=numpy.float64)
     distances = numpy.empty(tiles_grid.shape, dtype=numpy.float64)
-    _search.flood_from(tiles_grid, start_i, start_j, costs, distances)
-    return Flood(costs, distances)
+    parents = numpy.empty(tiles_grid.shape, dtype=numpy.intc)
+    _search.cheapest_paths_from(tiles_grid, start_i, start_j, costs, distances, parents)
+    costs.flags.writeable = distances.flags.writeable = False
+    return CheapestPaths(costs, distances, parents)
 
 
 def _as_grid(grid: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.float64]:
@@ -98,9 +119,7 @@ def _as_grid(grid: ArrayLike) -> NDArray[numpy.bool_] | NDArray[numpy.float64]:
     return numpy.ascontiguousarray(array, dtype=numpy.float64)
 
 
-def _checked_tile(
-    grid: NDArray[numpy.bool_] | NDArray[numpy.float64], tile: tuple[int, int], which: str
-) -> tuple[int, int]:
+def _checked_tile(grid: NDArray[numpy.generic], tile: tuple[int, int], which: str) -> tuple[int, int]:
     """`tile` as two ints, raising `IndexError` if the grid has no such tile; a negative index counts as outside."""
     i, j = (index(coordinate) for coordinate in tile)
     width, height = grid.shape

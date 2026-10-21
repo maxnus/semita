@@ -63,17 +63,18 @@ SearchStatus find_cheapest_path(
 );
 
 /*
- * The cheapest path from tile `start` to every tile, by Dijkstra's algorithm: its cost into `costs` and its length
- * into `distances`, each holding one for every tile of the grid; infinite where no path reaches, and 0 at the start,
- * blocked or not. On a grid of bools the two are the same. Of several equally cheap paths to a tile, the length is
- * one of theirs.
+ * The cheapest path from tile `start` to every tile, by Dijkstra's algorithm: its cost into `costs`, its length into
+ * `distances` and the tile it arrives from into `parents`, each holding one for every tile of the grid. A cost and a
+ * length are infinite where no path reaches, and 0 at the start, blocked or not; on a grid of bools the two are the
+ * same. The start's parent is -1, and the parent of a tile no path reaches is never written. Of several equally cheap
+ * paths to a tile, the one recorded is one of them.
  */
-SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *distances);
+SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *distances, int *parents);
 
 /*
  * The path that ends at `end`, allocated into `tiles` as (i, j) pairs, walking `parent` back from it to a tile whose
  * parent is -1, each tile and its parent on one straight or diagonal run, and its length into `distance` unless it is
- * NULL.
+ * NULL. A walk longer than the grid has tiles, which only a broken chain of parents makes, gives SEARCH_BROKEN.
  */
 SearchStatus write_path(const Grid *grid, int end, const int *parent, int **tiles, int *tile_count, double *distance);
 

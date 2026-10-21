@@ -1,4 +1,5 @@
-/* The cheapest path from one tile to every tile, by Dijkstra's algorithm: each path's cost and its length. */
+/* The cheapest path from one tile to every tile, by Dijkstra's algorithm: each path's cost, its length and the tile
+   it arrives from. */
 
 #include <math.h>
 #include <stdint.h>
@@ -7,11 +8,13 @@
 #include "heap.h"
 #include "search.h"
 
-SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *distances) {
+SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *distances, int *parents) {
     int height = grid->height;
     size_t tile_count = (size_t)grid->width * (size_t)height;
+    /* A tile's parent is written when it is reached, and read only where its cost is finite. */
     for (size_t tile = 0; tile < tile_count; tile++) costs[tile] = distances[tile] = INFINITY;
     costs[start] = distances[start] = 0.0;
+    parents[start] = -1;
     if (!is_passable(grid, start / height, start % height)) return SEARCH_DONE;
 
     uint8_t *settled = calloc(tile_count, 1);
@@ -36,6 +39,7 @@ SearchStatus fill_flood(const Grid *grid, int start, double *costs, double *dist
             if (cost < costs[neighbor]) {
                 costs[neighbor] = cost;
                 distances[neighbor] = distances[tile] + (di && dj ? SQRT_2 : 1.0);
+                parents[neighbor] = tile;
                 if (heap_push(&heap, cost, neighbor)) {
                     status = SEARCH_OUT_OF_MEMORY;
                     goto done;

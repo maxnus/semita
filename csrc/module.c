@@ -37,12 +37,15 @@ static int read_grid(PyObject *object, Py_buffer *view, Grid *grid) {
     return 0;
 }
 
-/* Read `object` as a writable, C-contiguous buffer of `count` doubles. */
-static int read_output(PyObject *object, Py_buffer *view, Py_ssize_t count) {
-    if (PyObject_GetBuffer(object, view, PyBUF_WRITABLE | PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) < 0) return -1;
-    if (!view->format || strcmp(view->format, "d") != 0 || view->itemsize != (Py_ssize_t)sizeof(double) ||
-        view->len != (Py_ssize_t)sizeof(double) * count) {
-        PyErr_Format(PyExc_TypeError, "the output must be a C-contiguous buffer of %zd items of format 'd'", count);
+/* Read `object` as a C-contiguous buffer of `count` items of `format`, each `itemsize` bytes, writable if `writable`. */
+static int read_items(
+    PyObject *object, Py_buffer *view, int writable, const char *format, Py_ssize_t itemsize, Py_ssize_t count
+) {
+    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
+    if (PyObject_GetBuffer(object, view, flags) < 0) return -1;
+    if (!view->format || strcmp(view->format, format) != 0 || view->itemsize != itemsize ||
+        view->len != itemsize * count) {
+        PyErr_Format(PyExc_TypeError, "the buffer must be C-contiguous, of %zd items of format '%s'", count, format);
         PyBuffer_Release(view);
         return -1;
     }
@@ -137,24 +140,30 @@ static PyObject *find_path(PyObject *module, PyObject *args) {
     return result;
 }
 
-static PyObject *flood_from(PyObject *module, PyObject *args) {
+static PyObject *cheapest_paths_from(PyObject *module, PyObject *args) {
     (void)module;
-    PyObject *grid_object, *costs_object, *distances_object;
+    PyObject *grid_object, *costs_object, *distances_object, *parents_object;
     int start_i, start_j;
-    if (!PyArg_ParseTuple(args, "OiiOO:flood_from", &grid_object, &start_i, &start_j, &costs_object,
-                          &distances_object)) {
+    if (!PyArg_ParseTuple(args, "OiiOOO:cheapest_paths_from", &grid_object, &start_i, &start_j, &costs_object,
+                          &distances_object, &parents_object)) {
         return NULL;
     }
-    Py_buffer grid_view, costs_view, distances_view;
+    Py_buffer grid_view, costs_view, distances_view, parents_view;
     Grid grid;
     if (read_grid(grid_object, &grid_view, &grid) < 0) return NULL;
     Py_ssize_t tile_count = (Py_ssize_t)grid.width * grid.height;
     int start = tile_at(&grid, start_i, start_j, "start");
-    if (start < 0 || read_output(costs_object, &costs_view, tile_count) < 0) {
+    if (start < 0 || read_items(costs_object, &costs_view, 1, "d", (Py_ssize_t)sizeof(double), tile_count) < 0) {
         PyBuffer_Release(&grid_view);
         return NULL;
     }
-    if (read_output(distances_object, &distances_view, tile_count) < 0) {
+    if (read_items(distances_object, &distances_view, 1, "d", (Py_ssize_t)sizeof(double), tile_count) < 0) {
+        PyBuffer_Release(&costs_view);
+        PyBuffer_Release(&grid_view);
+        return NULL;
+    }
+    if (read_items(parents_object, &parents_view, 1, "i", (Py_ssize_t)sizeof(int), tile_count) < 0) {
+        PyBuffer_Release(&distances_view);
         PyBuffer_Release(&costs_view);
         PyBuffer_Release(&grid_view);
         return NULL;
@@ -165,10 +174,12 @@ static PyObject *flood_from(PyObject *module, PyObject *args) {
     Py_BEGIN_ALLOW_THREADS
     if (grid.costs) status = check_costs(&grid, &cheapest, &dearest, &bad_tile);
     if (status == SEARCH_DONE) {
-        status = fill_flood(&grid, start, (double *)costs_view.buf, (double *)distances_view.buf);
+        status = fill_flood(&grid, start, (double *)costs_view.buf, (double *)distances_view.buf,
+                            (int *)parents_view.buf);
     }
     Py_END_ALLOW_THREADS
     int failed = check_status(status, &grid, bad_tile);
+    PyBuffer_Release(&parents_view);
     PyBuffer_Release(&distances_view);
     PyBuffer_Release(&costs_view);
     PyBuffer_Release(&grid_view);
@@ -176,15 +187,52 @@ static PyObject *flood_from(PyObject *module, PyObject *args) {
     Py_RETURN_NONE;
 }
 
+static PyObject *walk_back(PyObject *module, PyObject *args) {
+    (void)module;
+    PyObject *parents_object;
+    int end_i, end_j;
+    if (!PyArg_ParseTuple(args, "Oii:walk_back", &parents_object, &end_i, &end_j)) return NULL;
+    Py_buffer parents_view;
+    if (PyObject_GetBuffer(parents_object, &parents_view, PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) < 0) return NULL;
+    if (parents_view.ndim != 2 || !parents_view.format || strcmp(parents_view.format, "i") != 0 ||
+        parents_view.itemsize != (Py_ssize_t)sizeof(int) || parents_view.shape[0] > INT_MAX ||
+        parents_view.shape[1] > INT_MAX ||
+        (parents_view.shape[1] > 0 && parents_view.shape[0] > INT_MAX / parents_view.shape[1])) {
+        PyErr_SetString(PyExc_TypeError, "the parents must be a 2-D C-contiguous buffer of C ints");
+        PyBuffer_Release(&parents_view);
+        return NULL;
+    }
+    Grid grid = {NULL, NULL, (int)parents_view.shape[0], (int)parents_view.shape[1]};
+    int end = tile_at(&grid, end_i, end_j, "end");
+    if (end < 0) {
+        PyBuffer_Release(&parents_view);
+        return NULL;
+    }
+    int *tiles = NULL, tile_count = 0;
+    SearchStatus status;
+    Py_BEGIN_ALLOW_THREADS
+    status = write_path(&grid, end, (const int *)parents_view.buf, &tiles, &tile_count, NULL);
+    Py_END_ALLOW_THREADS
+    PyBuffer_Release(&parents_view);
+    if (check_status(status, &grid, -1) < 0) return NULL;
+    Py_ssize_t size = 2 * (Py_ssize_t)tile_count * (Py_ssize_t)sizeof *tiles;
+    PyObject *path = PyBytes_FromStringAndSize((const char *)tiles, size);
+    free(tiles);
+    return path;
+}
+
 static PyMethodDef module_methods[] = {
     {"find_path", find_path, METH_VARARGS,
      "find_path(grid, start_i, start_j, end_i, end_j, /)\n--\n\n"
      "The cheapest path's cost, its length and its tiles as C ints, i and j in turn, or None for the tiles if there "
      "is none. The grid is a buffer of bools, or of doubles, its costs."},
-    {"flood_from", flood_from, METH_VARARGS,
-     "flood_from(grid, start_i, start_j, costs, distances, /)\n--\n\n"
-     "Write the cost of the cheapest path from the start to every tile into `costs`, and its length into "
-     "`distances`."},
+    {"cheapest_paths_from", cheapest_paths_from, METH_VARARGS,
+     "cheapest_paths_from(grid, start_i, start_j, costs, distances, parents, /)\n--\n\n"
+     "Write the cost of the cheapest path from the start to every tile into `costs`, its length into `distances`, and "
+     "the tile it arrives from into `parents`, -1 for the start; a tile no path reaches has no parent written."},
+    {"walk_back", walk_back, METH_VARARGS,
+     "walk_back(parents, end_i, end_j, /)\n--\n\n"
+     "The tiles of the path the parents lead along to the end, as C ints, i and j in turn; the end must be reached."},
     {NULL, NULL, 0, NULL},
 };
 

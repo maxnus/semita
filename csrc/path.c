@@ -8,13 +8,15 @@ SearchStatus write_path(const Grid *grid, int end, const int *parent, int **tile
     int height = grid->height;
     long long count = 1;
     double length = 0.0;
+    long long grid_tiles = (long long)grid->width * height;
     for (int tile = end; parent[tile] != -1; tile = parent[tile]) {
+        if (parent[tile] < 0 || parent[tile] >= grid_tiles) return SEARCH_BROKEN;
         int di = abs(tile / height - parent[tile] / height), dj = abs(tile % height - parent[tile] % height);
         if (di && dj && di != dj) return SEARCH_BROKEN;
         count += di > dj ? di : dj;
         length += di && dj ? SQRT_2 * di : (double)(di + dj);
+        if (count > grid_tiles) return SEARCH_BROKEN;
     }
-    if (count > (long long)grid->width * height) return SEARCH_BROKEN;
     int *path = malloc(2 * (size_t)count * sizeof *path);
     if (!path) return SEARCH_OUT_OF_MEMORY;
     int position = (int)count - 1;
