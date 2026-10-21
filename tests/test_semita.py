@@ -175,11 +175,48 @@ def test_a_tile_outside_the_grid_raises(tile: tuple[int, int]) -> None:
         semita.find_path(passable, (0, 0), tile)
 
 
-def test_a_grid_is_two_dimensional_and_of_bool_or_uint8() -> None:
+@pytest.mark.parametrize(
+    "dtype", [numpy.int8, numpy.uint16, numpy.int32, numpy.int64, numpy.float32, numpy.float64, numpy.complex64]
+)
+def test_a_grid_of_any_number_is_passable_where_nonzero(dtype: type[numpy.number]) -> None:
+    passable = _TEST_GRIDS["dense"]
+    # Blocked tiles read 0, passable ones a nonzero value of either sign.
+    numbers = (passable * numpy.where(numpy.indices(passable.shape).sum(axis=0) % 2, 3, -2)).astype(dtype)
+    start, end = _tiles_of(passable, 2, seed=15)
+    path, same = semita.find_path(numbers, start, end), semita.find_path(passable, start, end)
+    assert (path is None) == (same is None)
+    if path is not None and same is not None:
+        assert numpy.array_equal(path.tiles, same.tiles)
+    assert numpy.array_equal(semita.distances_from(numbers, start), semita.distances_from(passable, start))
+
+
+def test_a_grid_given_as_nested_lists_is_read_as_numbers() -> None:
+    path = semita.find_path([[1, 1, 1], [0, 0, 1], [1, 1, 1]], (0, 0), (2, 0))
+    assert path is not None
+    assert path.distance == 6.0
+
+
+def test_nan_is_nonzero_so_passable() -> None:
+    grid = numpy.array([[1.0, math.nan, 1.0]])
+    path = semita.find_path(grid, (0, 0), (0, 2))
+    assert path is not None
+    assert path.tiles.tolist() == [[0, 0], [0, 1], [0, 2]]
+
+
+def test_a_number_grid_that_is_not_c_contiguous_is_read_by_its_indices() -> None:
+    passable = _TEST_GRIDS["dense"]
+    numbers = numpy.asfortranarray(passable.astype(numpy.float64))
+    assert not numbers.flags.c_contiguous
+    start = _tiles_of(passable, 1, seed=16)[0]
+    assert numpy.array_equal(semita.distances_from(numbers, start), semita.distances_from(passable, start))
+
+
+def test_a_grid_is_two_dimensional_and_of_bools_or_numbers() -> None:
     with pytest.raises(ValueError, match="two-dimensional, got 1"):
         semita.find_path(numpy.ones(5, dtype=bool), (0, 0), (1, 1))
-    with pytest.raises(TypeError, match="bool or uint8, got float64"):
-        semita.distances_from(numpy.ones((3, 3)), (0, 0))
+    for grid in (numpy.array([["a", "b"]]), numpy.array([[object()]]), numpy.zeros((2, 2), dtype="datetime64[s]")):
+        with pytest.raises(TypeError, match=re.escape(f"bools or numbers, got {grid.dtype}")):
+            semita.distances_from(grid, (0, 0))
 
 
 def test_the_c_module_checks_the_buffers_it_is_handed() -> None:

@@ -27,7 +27,9 @@ assert distances[2, 1] == float("inf")
 
 ## The rules
 
-- A grid is a 2-D numpy array of bools, or of bytes passable where nonzero, indexed `[i, j]`.
+- A grid is a 2-D numpy array of bools or numbers, or anything numpy reads as one, passable where nonzero, NaN
+  included, and indexed `[i, j]`. Bools and uint8 are read as they are; a grid of any other number is converted on
+  each call, so one searched often is best kept as bools.
 - A step goes to one of the eight neighboring tiles, 1 long straight and √2 diagonally, and only between passable
   tiles. A diagonal step needs both tiles beside it passable too, so no path cuts a corner.
 - The start is a path to itself, 0 long, even on a blocked tile, but no step leaves or enters a blocked one.
