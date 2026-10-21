@@ -29,7 +29,7 @@ from numpy.typing import ArrayLike, NDArray
 from semita import _search
 from semita._version import __version__
 
-__all__ = ["CheapestPaths", "Path", "__version__", "cheapest_paths_from", "find_path"]
+__all__ = ["CheapestPaths", "Path", "__version__", "cheapest_path", "cheapest_paths_from"]
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -73,7 +73,7 @@ class CheapestPaths:
         return Path(float(self.distances[end_i, end_j]), float(self.costs[end_i, end_j]), tile_array)
 
 
-def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> Path | None:
+def cheapest_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> Path | None:
     """A cheapest path from `start` to `end` over the `grid`, or `None` if there is none. Of several equally cheap paths
     it is one, but which is not part of the contract.
 
@@ -83,7 +83,7 @@ def find_path(grid: ArrayLike, start: tuple[int, int], end: tuple[int, int]) -> 
     tiles_grid = _as_grid(grid)
     start_i, start_j = _checked_tile(tiles_grid, start, "start")
     end_i, end_j = _checked_tile(tiles_grid, end, "end")
-    cost, distance, tiles = _search.find_path(tiles_grid, start_i, start_j, end_i, end_j)
+    cost, distance, tiles = _search.cheapest_path(tiles_grid, start_i, start_j, end_i, end_j)
     if tiles is None:
         return None
     # An array over bytes is read-only.
@@ -94,7 +94,7 @@ def cheapest_paths_from(grid: ArrayLike, start: tuple[int, int]) -> CheapestPath
     """The cheapest path from `start` to every tile over the `grid`, by Dijkstra's algorithm, in one pass: each one's
     cost and length, and `path_to` for its tiles.
 
-    Raises as `find_path` does.
+    Raises as `cheapest_path` does.
     """
     tiles_grid = _as_grid(grid)
     start_i, start_j = _checked_tile(tiles_grid, start, "start")
