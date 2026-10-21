@@ -163,7 +163,9 @@ def test_a_grid_that_is_not_c_contiguous_is_read_by_its_indices() -> None:
     for grid in (passable, _random_costs(passable, seed=14)):
         transposed = numpy.ascontiguousarray(grid.T).T
         assert not transposed.flags.c_contiguous
-        assert numpy.array_equal(semita.flood_from(transposed, start).costs, semita.flood_from(grid, start).costs)
+        flood, same_flood = semita.flood_from(transposed, start), semita.flood_from(grid, start)
+        assert numpy.array_equal(flood.costs, same_flood.costs)
+        assert numpy.array_equal(flood.distances, same_flood.distances)
         path, same = semita.find_path(transposed, start, end), semita.find_path(grid, start, end)
         assert (path is None) == (same is None)
         if path is not None and same is not None:
@@ -272,7 +274,8 @@ def test_searches_on_threads_at_once_find_what_they_find_one_at_a_time() -> None
         for grid in (passable, _random_costs(passable, seed=17)):
             path = semita.find_path(grid, start, end)
             found.append(None if path is None else (path.cost, path.distance, path.tiles.tolist()))
-            found.append(semita.flood_from(grid, start).costs.tolist())
+            flood = semita.flood_from(grid, start)
+            found.append((flood.costs.tolist(), flood.distances.tolist()))
         return tuple(found)
 
     one_at_a_time = [search(job) for job in jobs]
