@@ -53,8 +53,14 @@ test-sources = ["tests", "README.md"]
 test-command = "pytest tests"
 
 [tool.uv]
-# uv rebuilds the package only when one of these changes; by default that is only pyproject.toml.
-cache-keys = [{ file = "pyproject.toml" }, { file = "setup.py" }, { file = "csrc/*" }]
+# uv rebuilds the package only when one of these changes; by default that is only pyproject.toml. The commit and
+# the tags are among them so that `semita.__version__` follows git.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "setup.py" },
+    { file = "csrc/*" },
+    { git = { commit = true, tags = true } },
+]
 
 [tool.ruff]
 line-length = 120

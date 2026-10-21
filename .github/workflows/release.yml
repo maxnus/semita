@@ -84,12 +84,16 @@ jobs:
       - name: The stable ABI alone
         run: uvx abi3audit@0.0.26 --strict --summary dist/*.whl
 
-      - name: The tag is the version
+      - name: The tag is v and a version
         if: github.event_name == 'release'
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [ ! -f "dist/semita-$version.tar.gz" ]; then
-            echo "The tag $GITHUB_REF_NAME is not v and semita's version, which built: $(ls dist)"
+          tag="$GITHUB_REF_NAME"
+          if [[ "$tag" != v* ]]; then
+            echo "A release's tag is v and its version, such as v0.2.0, not $tag"
+            exit 1
+          fi
+          if [ ! -f "dist/semita-${tag#v}.tar.gz" ]; then
+            echo "setuptools-scm did not read $tag as semita's version, and built $(ls dist)"
             exit 1
           fi
 
