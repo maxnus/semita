@@ -1,7 +1,7 @@
 # semita
 
-Shortest paths and distances on a grid, in C, for Python: jump point search for one path, Dijkstra for every
-tile's distance from a point. *Semita* is Latin for a footpath.
+Shortest and cheapest paths and distances on a grid, in C, for Python: jump point search for one path, A* for one
+where tiles have costs, and Dijkstra for every tile's distance or cost from a point. *Semita* is Latin for a footpath.
 
 Written for [NachOS](https://github.com/maxnus/NachOS), a StarCraft II bot library, though nothing in it is about
 StarCraft.
@@ -23,6 +23,14 @@ assert semita.find_path(passable, (0, 0), (2, 1)) is None  # the end is blocked
 distances = semita.distances_from(passable, (0, 0))
 assert distances[4, 0] == path.distance
 assert distances[2, 1] == float("inf")
+
+# Costs: moving a unit of distance across a tile costs 1 on normal ground, more where it is best avoided.
+open_ground = numpy.ones((7, 7), dtype=bool)
+costs = numpy.ones((7, 7))
+costs[2:5, 2:5] = 10.0  # a patch to keep out of
+around = semita.find_path(open_ground, (3, 0), (3, 6), costs=costs)
+assert round(around.cost, 2) == round(around.distance, 2) == 7.66  # round the patch, on ground costing 1
+assert semita.find_path(open_ground, (3, 0), (3, 6)).distance == 6.0  # straight through it, without costs
 ```
 
 ## The rules
@@ -34,9 +42,17 @@ assert distances[2, 1] == float("inf")
   tiles. A diagonal step needs both tiles beside it passable too, so no path cuts a corner.
 - The start is a path to itself, 0 long, even on a blocked tile, but no step leaves or enters a blocked one.
 - A start or an end outside the grid raises `IndexError`; a negative index counts as outside.
-- `find_path` returns a `Path`, its `distance` and its `tiles` from the start to the end, or `None` if there is no
-  path. Of several equally short paths it returns one, but which is not part of the contract.
+- `find_path` returns a `Path`, its `distance`, its `cost` and its `tiles` from the start to the end, or `None` if
+  there is no path. Of several equally cheap paths it returns one, but which is not part of the contract.
 - `distances_from` returns an array of the grid's shape, `inf` where no path reaches.
+- `costs=`, a grid of real numbers of the grid's shape, gives each tile the cost of moving one unit of distance across
+  it: 1 for normal ground, less where movement is faster, more where it is slower or best avoided. A step then costs
+  its length times the mean of the costs of the two tiles it joins, so a path costs the same both ways.
+  `find_path` returns the cheapest path, its `cost` beside its `distance`, and `distances_from` each tile's cost.
+- A passable tile's cost is positive, and `inf` blocks the tile; zero, negative or NaN raises `ValueError`. The
+  costs of tiles `passable` blocks are never read.
+- Without costs a path is found by jump point search; with them, by A*, which visits more tiles, the more so the
+  cheaper the cheapest tile is, since its estimate of what is left is the straight distance times that cost.
 
 Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid must not
 be written to while a search reads it.

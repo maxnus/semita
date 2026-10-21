@@ -1,4 +1,4 @@
-/* Every tile's distance from one, by Dijkstra's algorithm. */
+/* Every tile's distance from one, or its cost on a grid with costs, by Dijkstra's algorithm. */
 
 #include <math.h>
 #include <stdint.h>
@@ -12,7 +12,7 @@ SearchStatus fill_distances(const Grid *grid, int start, double *distances) {
     size_t tile_count = (size_t)grid->width * (size_t)height;
     for (size_t tile = 0; tile < tile_count; tile++) distances[tile] = INFINITY;
     distances[start] = 0.0;
-    if (!grid->passable[start]) return SEARCH_DONE;
+    if (!is_passable(grid, start / height, start % height)) return SEARCH_DONE;
 
     uint8_t *settled = calloc(tile_count, 1);
     if (!settled) return SEARCH_OUT_OF_MEMORY;
@@ -32,7 +32,7 @@ SearchStatus fill_distances(const Grid *grid, int start, double *distances) {
             if (!can_step(grid, i, j, di, dj)) continue;
             int neighbor = tile + di * height + dj;
             if (settled[neighbor]) continue;
-            double distance = distances[tile] + (step < 4 ? 1.0 : SQRT_2);
+            double distance = distances[tile] + step_cost(grid, tile, di, dj);
             if (distance < distances[neighbor]) {
                 distances[neighbor] = distance;
                 if (heap_push(&heap, distance, neighbor)) {
