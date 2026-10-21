@@ -71,7 +71,8 @@ SearchStatus fill_distances(const Grid *grid, int start, double *distances);
 
 /*
  * The path that ends at `end`, allocated into `tiles` as (i, j) pairs, walking `parent` back from it to a tile whose
- * parent is -1, each tile and its parent on one straight or diagonal run, and its length into `distance`.
+ * parent is -1, each tile and its parent on one straight or diagonal run, and its length into `distance` unless it is
+ * NULL.
  */
 SearchStatus write_path(const Grid *grid, int end, const int *parent, int **tiles, int *tile_count, double *distance);
 

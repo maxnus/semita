@@ -38,6 +38,6 @@ SearchStatus write_path(const Grid *grid, int end, const int *parent, int **tile
     }
     *tiles = path;
     *tile_count = (int)count;
-    *distance = length;
+    if (distance) *distance = length;
     return SEARCH_DONE;
 }

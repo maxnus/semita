@@ -50,12 +50,13 @@ assert semita.find_path(open_ground, (3, 0), (3, 6)).distance == 6.0  # straight
   its length times the mean of the costs of the two tiles it joins, so a path costs the same both ways.
   `find_path` returns the cheapest path, its `cost` beside its `distance`, and `distances_from` each tile's cost.
 - A passable tile's cost is positive, and `inf` blocks the tile; zero, negative or NaN raises `ValueError`. The
-  costs of tiles `passable` blocks are never read.
+  costs of tiles `passable` blocks are never read. Costs that are C-contiguous float64 are read as they are; any
+  others are converted on each call.
 - Without costs a path is found by jump point search; with them, by A*, which visits more tiles, the more so the
   cheaper the cheapest tile is, since its estimate of what is left is the straight distance times that cost.
 
-Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid must not
-be written to while a search reads it.
+Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid and its
+costs must not be written to while a search reads them.
 
 ## Building
 

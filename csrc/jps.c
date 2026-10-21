@@ -133,8 +133,8 @@ SearchStatus find_path_by_jump_points(
         if (state[tile] == SETTLED) continue;
         state[tile] = SETTLED;
         if (tile == end) {
-            double walked;
-            status = write_path(grid, end, parent, tiles, tile_count, &walked);
+            /* The cost to the end is the path's length, the same number its cost is reported as. */
+            status = write_path(grid, end, parent, tiles, tile_count, NULL);
             if (status == SEARCH_DONE) *distance = cost[end];
             break;
         }

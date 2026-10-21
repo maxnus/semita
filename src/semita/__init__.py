@@ -10,10 +10,11 @@ tile, but no step leaves or enters a blocked one.
 normal ground, less where movement is faster, more where it is slower or best avoided. A step then costs its length
 times the mean of the costs of the two tiles it joins, so a path costs the same both ways. A passable tile's cost is
 positive, and `inf` blocks the tile as `passable` does; the costs of tiles `passable` blocks are never read. Without
-costs, a step costs its length.
+costs, a step costs its length. Costs that are C-contiguous float64 are read as they are; any others are converted on
+each call.
 
-Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid must not be
-written to while a search reads it.
+Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid and its
+costs must not be written to while a search reads them.
 """
 
 from dataclasses import dataclass
