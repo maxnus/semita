@@ -59,4 +59,4 @@ jobs:
         run: |
           wheel=$(ls dist/semita-*-cp312-abi3-*.whl)
           uv run --isolated --no-project --python 3.14 --with "$wheel" python -c \
-            "import numpy, semita; assert semita.find_path(numpy.ones((3, 3), dtype=bool), (0, 0), (2, 2)) is not None"
+            "import numpy, semita; assert semita.cheapest_path(numpy.ones((3, 3), bool), (0, 0), (2, 2)) is not None"

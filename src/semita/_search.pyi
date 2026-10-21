@@ -1,6 +1,6 @@
 from collections.abc import Buffer
 
-def find_path(
+def cheapest_path(
     grid: Buffer, start_i: int, start_j: int, end_i: int, end_j: int, /
 ) -> tuple[float, float, bytes | None]: ...
 def cheapest_paths_from(

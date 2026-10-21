@@ -104,11 +104,11 @@ static SearchStatus find_any_path(
     return status;
 }
 
-static PyObject *find_path(PyObject *module, PyObject *args) {
+static PyObject *cheapest_path(PyObject *module, PyObject *args) {
     (void)module;
     PyObject *grid_object;
     int start_i, start_j, end_i, end_j;
-    if (!PyArg_ParseTuple(args, "Oiiii:find_path", &grid_object, &start_i, &start_j, &end_i, &end_j)) return NULL;
+    if (!PyArg_ParseTuple(args, "Oiiii:cheapest_path", &grid_object, &start_i, &start_j, &end_i, &end_j)) return NULL;
     Py_buffer grid_view;
     Grid grid;
     if (read_grid(grid_object, &grid_view, &grid) < 0) return NULL;
@@ -222,8 +222,8 @@ static PyObject *walk_back(PyObject *module, PyObject *args) {
 }
 
 static PyMethodDef module_methods[] = {
-    {"find_path", find_path, METH_VARARGS,
-     "find_path(grid, start_i, start_j, end_i, end_j, /)\n--\n\n"
+    {"cheapest_path", cheapest_path, METH_VARARGS,
+     "cheapest_path(grid, start_i, start_j, end_i, end_j, /)\n--\n\n"
      "The cheapest path's cost, its length and its tiles as C ints, i and j in turn, or None for the tiles if there "
      "is none. The grid is a buffer of bools, or of doubles, its costs."},
     {"cheapest_paths_from", cheapest_paths_from, METH_VARARGS,
