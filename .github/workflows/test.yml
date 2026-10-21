@@ -1,0 +1,62 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12", "3.13"]
+    env:
+      # The C compiler's warnings fail the build here.
+      SEMITA_WARNINGS_AS_ERRORS: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install, compiling the extension
+        run: uv sync --python ${{ matrix.python-version }} --extra dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run pyright
+
+      - name: Test
+        run: uv run pytest -v
+
+  wheel:
+    # One wheel on the stable ABI serves every Python from 3.12; this checks the one built here loads on the newest.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: SEMITA_WARNINGS_AS_ERRORS=1 uv build
+
+      - name: Load the wheel on Python 3.14
+        run: |
+          wheel=$(ls dist/semita-*-cp312-abi3-*.whl)
+          uv run --isolated --no-project --python 3.14 --with "$wheel" python -c \
+            "import numpy, semita; assert semita.find_path(numpy.ones((3, 3), dtype=bool), (0, 0), (2, 2)) is not None"
