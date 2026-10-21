@@ -66,8 +66,8 @@ jobs:
           path: wheelhouse/*.whl
 
   check:
-    # What would be uploaded, all of it, and for a release the tag's version. cibuildwheel has already audited each
-    # wheel for the stable ABI alone, with abi3audit --strict.
+    # What would be uploaded, all of it, and for a release the tag's version. Each wheel has already been audited for
+    # the stable ABI alone, by the audit-command in pyproject.toml.
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
     steps:

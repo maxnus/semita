@@ -47,6 +47,9 @@ build = "cp312-*"
 skip = "*-musllinux_*"
 archs = ["native"]
 environment = { SEMITA_WARNINGS_AS_ERRORS = "1" }
+# Each wheel must use the stable ABI alone, or it would not load on the later Pythons its tag promises. This is
+# cibuildwheel's default too, stated here so that no upgrade of it drops the check.
+audit-command = "abi3audit --strict --report {abi3_wheel}"
 test-requires = ["pytest", "scipy"]
 # The wheels are built from the sdist, and the tests run from what it holds.
 test-sources = ["tests", "README.md"]
