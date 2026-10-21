@@ -12,35 +12,13 @@ permissions:
   contents: read
 
 jobs:
-  wheels:
-    name: wheels on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Each wheel is built and tested on its own architecture: Linux x86_64 and aarch64, Windows AMD64, and macOS
-        # arm64 and x86_64. pyproject.toml's [tool.cibuildwheel] says what is built and how it is tested.
-        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # The build runs code from setup.py and its dependencies, which then can't read the token.
-          persist-credentials: false
-
-      - name: Build and test
-        uses: pypa/cibuildwheel@v4.2.1
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.os }}
-          path: wheelhouse/*.whl
-
   sdist:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          # The version is the tag, which setuptools-scm reads from git.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Install uv
@@ -53,6 +31,39 @@ jobs:
         with:
           name: sdist
           path: dist/*.tar.gz
+
+  wheels:
+    # Every wheel is built from the sdist, so it carries the sdist's version and needs no git history.
+    needs: sdist
+    name: wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each wheel is built and tested on its own architecture: Linux x86_64 and aarch64, Windows AMD64, and macOS
+        # arm64 and x86_64. pyproject.toml's [tool.cibuildwheel] says what is built and how it is tested.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: sdist
+
+      - name: Find the sdist
+        id: sdist
+        shell: bash
+        run: echo "path=$(ls sdist/semita-*.tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test
+        uses: pypa/cibuildwheel@v4.2.1
+        with:
+          package-dir: ${{ steps.sdist.outputs.path }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
 
   check:
     # What would be uploaded: wheels on the stable ABI alone, and, for a release, the tag's version.

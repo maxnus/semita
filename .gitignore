@@ -3,6 +3,8 @@ __pycache__/
 *.so
 *.pyd
 *.egg-info/
+# Written by setuptools-scm at build time.
+src/semita/_version.py
 build/
 dist/
 .venv/

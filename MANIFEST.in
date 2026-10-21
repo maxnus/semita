@@ -1,1 +1,4 @@
 include csrc/*.c csrc/*.h
+# The release's wheels are built and tested from the sdist.
+graft tests
+global-exclude *.py[cod]
