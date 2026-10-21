@@ -7,6 +7,10 @@ on:
   release:
     types: [published]
 
+# Every job reads the repository at most; `publish` adds the identity PyPI trusts.
+permissions:
+  contents: read
+
 jobs:
   wheels:
     name: wheels on ${{ matrix.os }}
@@ -20,6 +24,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build runs code from setup.py and its dependencies, which then can't read the token.
+          persist-credentials: false
 
       - name: Build and test
         uses: pypa/cibuildwheel@v4.2.1
@@ -33,6 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -62,7 +71,7 @@ jobs:
         run: ls -l dist
 
       - name: The stable ABI alone
-        run: uvx abi3audit --strict --summary dist/*.whl
+        run: uvx abi3audit@0.0.26 --strict --summary dist/*.whl
 
       - name: The tag is the version
         if: github.event_name == 'release'
