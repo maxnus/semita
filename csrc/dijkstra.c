@@ -1,4 +1,4 @@
-/* Every tile's distance from one, or its cost on a grid with costs, by Dijkstra's algorithm. */
+/* Every tile's distance from one, or its cost on a grid of costs, by Dijkstra's algorithm. */
 
 #include <math.h>
 #include <stdint.h>

@@ -1,13 +1,12 @@
 /*
  * The searches semita runs, on a grid of tiles.
  *
- * Tile (i, j) of a grid `width` by `height` is at index i * height + j, passable where nonzero. A step goes to one of
- * the eight neighboring tiles, 1 long straight and sqrt(2) diagonally, and only between passable tiles. A diagonal
- * step needs both tiles beside it passable too, so no path cuts a corner.
- *
- * A grid may give each tile a cost, of moving one unit of distance across it: a step then costs its length times the
- * mean of the costs of the two tiles it joins. A cost is positive, and an infinite one blocks its tile. Without costs,
- * a step costs its length.
+ * Tile (i, j) of a grid `width` by `height` is at index i * height + j. A grid is either of bools, a tile passable
+ * where true, or of costs, the cost of moving one unit of distance across each tile: positive, and 0 or infinite
+ * where the tile is blocked. A step goes to one of the eight neighboring tiles, 1 long straight and sqrt(2)
+ * diagonally, and only between passable tiles. A diagonal step needs both tiles beside it passable too, so no path
+ * cuts a corner. A step costs its length times the mean of the costs of the two tiles it joins, and on a grid of bools
+ * its length.
  *
  * Every search allocates its own memory and touches no global state, so searches can run at once on any threads.
  */
@@ -19,9 +18,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/* One of `passable` and `costs` is NULL. */
 typedef struct {
     const uint8_t *passable;
-    /* A cost for every tile, or NULL for none. */
     const double *costs;
     int width;
     int height;
@@ -32,18 +31,19 @@ typedef enum {
     SEARCH_OUT_OF_MEMORY = 1,
     /* The search contradicted itself, which is a bug in semita. */
     SEARCH_BROKEN = 2,
-    /* A passable tile's cost is zero, negative or NaN. */
+    /* A tile's cost is negative or NaN. */
     SEARCH_BAD_COST = 3,
 } SearchStatus;
 
 /*
- * Check every passable tile's cost, and find the cheapest finite one into `cheapest`, infinite if there is none. A
- * cost that is zero, negative or NaN gives SEARCH_BAD_COST, with its tile in `bad_tile`.
+ * Check every tile's cost, and find the cheapest and the dearest of the passable tiles into `cheapest` and `dearest`,
+ * infinite and 0 if there is none. A cost that is negative or NaN gives SEARCH_BAD_COST, with its tile in `bad_tile`.
  */
-SearchStatus check_costs(const Grid *grid, double *cheapest, int *bad_tile);
+SearchStatus check_costs(const Grid *grid, double *cheapest, double *dearest, int *bad_tile);
 
 /*
- * A shortest path from tile `start` to tile `end` on a grid without costs, by jump point search: its tiles as (i, j)
+ * A shortest path from tile `start` to tile `end` on a grid of bools, or of costs all the same, by jump point search,
+ * which reads only which tiles are passable: its tiles as (i, j)
  * pairs, allocated into `tiles` for the caller to free, their number into `tile_count` and its length into
  * `distance`. The start alone is a path to itself, blocked or not. Where no path exists, `tiles` is NULL, `tile_count`
  * 0 and `distance` infinite.
@@ -53,7 +53,7 @@ SearchStatus find_path_by_jump_points(
 );
 
 /*
- * The cheapest path from tile `start` to tile `end` on a grid with costs, by A*, whose estimate of what is left is
+ * The cheapest path from tile `start` to tile `end` on a grid of costs, by A*, whose estimate of what is left is
  * the octile distance times `cheapest`, the cheapest cost on the grid: its tiles as for find_path_by_jump_points, its
  * cost into `cost` and its length into `distance`.
  */
@@ -64,7 +64,7 @@ SearchStatus find_cheapest_path(
 
 /*
  * The cost of the cheapest path from tile `start` to every tile, by Dijkstra's algorithm, into `distances`, which
- * holds one for every tile of the grid: its length on a grid without costs, infinite where no path reaches, and 0 at
+ * holds one for every tile of the grid: its length on a grid of bools, infinite where no path reaches, and 0 at
  * the start, blocked or not.
  */
 SearchStatus fill_distances(const Grid *grid, int start, double *distances);
@@ -87,7 +87,9 @@ static const int STEP_J[8] = {0, 0, 1, -1, 1, -1, 1, -1};
 static inline int is_passable(const Grid *grid, int i, int j) {
     if (i < 0 || i >= grid->width || j < 0 || j >= grid->height) return 0;
     int tile = i * grid->height + j;
-    return grid->passable[tile] && (!grid->costs || grid->costs[tile] < INFINITY);
+    if (!grid->costs) return grid->passable[tile];
+    double cost = grid->costs[tile];
+    return cost > 0.0 && cost < INFINITY;
 }
 
 /* Whether a step of (di, dj) from the passable tile (i, j) lands on a passable tile without cutting a corner. */

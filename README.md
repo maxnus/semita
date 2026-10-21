@@ -1,7 +1,8 @@
 # semita
 
 Shortest and cheapest paths and distances on a grid, in C, for Python: jump point search for one path, A* for one
-where tiles have costs, and Dijkstra for every tile's distance or cost from a point. *Semita* is Latin for a footpath.
+where tiles cost differently, and Dijkstra for every tile's distance or cost from a point. *Semita* is Latin for a
+footpath.
 
 Written for [NachOS](https://github.com/maxnus/NachOS), a StarCraft II bot library, though nothing in it is about
 StarCraft.
@@ -24,39 +25,39 @@ distances = semita.distances_from(passable, (0, 0))
 assert distances[4, 0] == path.distance
 assert distances[2, 1] == float("inf")
 
-# Costs: moving a unit of distance across a tile costs 1 on normal ground, more where it is best avoided.
-open_ground = numpy.ones((7, 7), dtype=bool)
+# Costs: each value is the cost of moving a unit of distance across its tile, 1 on normal ground and more where it
+# is best avoided; 0 blocks, as False does.
 costs = numpy.ones((7, 7))
 costs[2:5, 2:5] = 10.0  # a patch to keep out of
-around = semita.find_path(open_ground, (3, 0), (3, 6), costs=costs)
+around = semita.find_path(costs, (3, 0), (3, 6))
 assert round(around.cost, 2) == round(around.distance, 2) == 7.66  # round the patch, on ground costing 1
-assert semita.find_path(open_ground, (3, 0), (3, 6)).distance == 6.0  # straight through it, without costs
+assert semita.find_path(numpy.ones((7, 7), dtype=bool), (3, 0), (3, 6)).distance == 6.0  # straight, on bools
 ```
 
 ## The rules
 
-- A grid is a 2-D numpy array of bools or numbers, or anything numpy reads as one, passable where nonzero, NaN
-  included, and indexed `[i, j]`. Bools and uint8 are read as they are; a grid of any other number is converted on
-  each call, so one searched often is best kept as bools.
+- A grid is a 2-D numpy array of bools or real numbers, or anything numpy reads as one, indexed `[i, j]`. Its values
+  are the tiles' costs: the cost of moving one unit of distance across each, 1 for normal ground, less where movement
+  is faster, more where it is slower or best avoided.
+- 0 and `inf` block a tile. A grid of bools is the simplest: `True` costs 1 and `False` blocks. Otherwise a cost is
+  positive; NaN and negatives raise `ValueError`.
 - A step goes to one of the eight neighboring tiles, 1 long straight and √2 diagonally, and only between passable
-  tiles. A diagonal step needs both tiles beside it passable too, so no path cuts a corner.
-- The start is a path to itself, 0 long, even on a blocked tile, but no step leaves or enters a blocked one.
+  tiles. A diagonal step needs both tiles beside it passable too, so no path cuts a corner. A step costs its length
+  times the mean of the costs of the two tiles it joins, so a path costs the same both ways.
+- The start is a path to itself, costing nothing, even on a blocked tile, but no step leaves or enters a blocked one.
 - A start or an end outside the grid raises `IndexError`; a negative index counts as outside.
 - `find_path` returns a `Path`, its `distance`, its `cost` and its `tiles` from the start to the end, or `None` if
   there is no path. Of several equally cheap paths it returns one, but which is not part of the contract.
-- `distances_from` returns an array of the grid's shape, `inf` where no path reaches.
-- `costs=`, a grid of real numbers of the grid's shape, gives each tile the cost of moving one unit of distance across
-  it: 1 for normal ground, less where movement is faster, more where it is slower or best avoided. A step then costs
-  its length times the mean of the costs of the two tiles it joins, so a path costs the same both ways.
-  `find_path` returns the cheapest path, its `cost` beside its `distance`, and `distances_from` each tile's cost.
-- A passable tile's cost is positive, and `inf` blocks the tile; zero, negative or NaN raises `ValueError`. The
-  costs of tiles `passable` blocks are never read. Costs that are C-contiguous float64 are read as they are; any
-  others are converted on each call.
-- Without costs a path is found by jump point search; with them, by A*, which visits more tiles, the more so the
-  cheaper the cheapest tile is, since its estimate of what is left is the straight distance times that cost.
+- `distances_from` returns an array of the grid's shape, each tile's cost from the start, `inf` where no path
+  reaches; on a grid of bools, its distance.
+- A grid whose passable tiles all cost the same, a grid of bools included, is searched by jump point search; any other
+  by A*, which visits more tiles, the more so the cheaper the cheapest tile is, since its estimate of what is left is
+  the straight distance times that cost.
+- A grid of bools, or a C-contiguous one of float64, is read as it is; any other is converted on each call, so one
+  searched often is best kept as one of those.
 
-Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid and its
-costs must not be written to while a search reads them.
+Each search allocates its own memory and releases the GIL, so searches run in parallel on threads. A grid must not be
+written to while a search reads it.
 
 ## Building
 

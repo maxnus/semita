@@ -7,17 +7,20 @@
 #include <Python.h>
 
 #include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "search.h"
 
-/* Read `object` as a grid of bools or bytes, C-contiguous and two-dimensional. */
+/* Read `object` as a grid, C-contiguous and two-dimensional: of bools, or of doubles, its costs. */
 static int read_grid(PyObject *object, Py_buffer *view, Grid *grid) {
     if (PyObject_GetBuffer(object, view, PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) < 0) return -1;
     const char *format = view->format ? view->format : "B";
-    if (view->ndim != 2 || view->itemsize != 1 || (strcmp(format, "?") != 0 && strcmp(format, "B") != 0)) {
-        PyErr_SetString(PyExc_TypeError, "the grid must be a 2-D C-contiguous buffer of bool or uint8");
+    int of_bools = strcmp(format, "?") == 0 && view->itemsize == 1;
+    int of_costs = strcmp(format, "d") == 0 && view->itemsize == (Py_ssize_t)sizeof(double);
+    if (view->ndim != 2 || !(of_bools || of_costs)) {
+        PyErr_SetString(PyExc_TypeError, "the grid must be a 2-D C-contiguous buffer of bool or double");
         PyBuffer_Release(view);
         return -1;
     }
@@ -27,44 +30,23 @@ static int read_grid(PyObject *object, Py_buffer *view, Grid *grid) {
         PyBuffer_Release(view);
         return -1;
     }
-    grid->passable = (const uint8_t *)view->buf;
-    grid->costs = NULL;
+    grid->passable = of_bools ? (const uint8_t *)view->buf : NULL;
+    grid->costs = of_costs ? (const double *)view->buf : NULL;
     grid->width = (int)view->shape[0];
     grid->height = (int)view->shape[1];
     return 0;
 }
 
-/* Read `object` as a C-contiguous buffer of `count` items in `format`, writable if `writable`; `what` names it in the
-   error raised otherwise. */
-static int read_items(
-    PyObject *object, Py_buffer *view, int writable, const char *format, Py_ssize_t itemsize, Py_ssize_t count,
-    const char *what
-) {
-    int flags = PyBUF_C_CONTIGUOUS | PyBUF_FORMAT | (writable ? PyBUF_WRITABLE : 0);
-    if (PyObject_GetBuffer(object, view, flags) < 0) return -1;
-    if (!view->format || strcmp(view->format, format) != 0 || view->itemsize != itemsize ||
-        view->len != itemsize * count) {
-        PyErr_Format(PyExc_TypeError, "%s must be a C-contiguous buffer of %zd items of format '%s'", what, count,
-                     format);
+/* Read `object` as a writable, C-contiguous buffer of `count` doubles. */
+static int read_output(PyObject *object, Py_buffer *view, Py_ssize_t count) {
+    if (PyObject_GetBuffer(object, view, PyBUF_WRITABLE | PyBUF_C_CONTIGUOUS | PyBUF_FORMAT) < 0) return -1;
+    if (!view->format || strcmp(view->format, "d") != 0 || view->itemsize != (Py_ssize_t)sizeof(double) ||
+        view->len != (Py_ssize_t)sizeof(double) * count) {
+        PyErr_Format(PyExc_TypeError, "the output must be a C-contiguous buffer of %zd items of format 'd'", count);
         PyBuffer_Release(view);
         return -1;
     }
     return 0;
-}
-
-/* Read `object` as the grid's costs, a double for every tile, unless it is None. `view->obj` is NULL for None. */
-static int read_costs(PyObject *object, Py_buffer *view, Grid *grid) {
-    view->obj = NULL;
-    grid->costs = NULL;
-    if (object == Py_None) return 0;
-    Py_ssize_t tile_count = (Py_ssize_t)grid->width * grid->height;
-    if (read_items(object, view, 0, "d", (Py_ssize_t)sizeof(double), tile_count, "the costs") < 0) return -1;
-    grid->costs = (const double *)view->buf;
-    return 0;
-}
-
-static void release(Py_buffer *view) {
-    if (view->obj) PyBuffer_Release(view);
 }
 
 /* The index of tile (i, j), or -1 with IndexError set if the grid has no such tile. */
@@ -77,7 +59,7 @@ static int tile_at(const Grid *grid, int i, int j, const char *which) {
     return i * grid->height + j;
 }
 
-/* Raise for a search that did not finish, while the grid's costs can still be read; 0 if it did. */
+/* Raise for a search that did not finish, while the grid can still be read; 0 if it did. */
 static int check_status(SearchStatus status, const Grid *grid, int bad_tile) {
     switch (status) {
     case SEARCH_DONE:
@@ -88,7 +70,7 @@ static int check_status(SearchStatus status, const Grid *grid, int bad_tile) {
     case SEARCH_BAD_COST: {
         PyObject *cost = PyFloat_FromDouble(grid->costs[bad_tile]);
         if (cost) {
-            PyErr_Format(PyExc_ValueError, "the cost at (%d, %d) is %R; a passable tile's cost is positive, or inf to "
+            PyErr_Format(PyExc_ValueError, "the cost at (%d, %d) is %R; a tile's cost is positive, or 0 or inf to "
                          "block it", bad_tile / grid->height, bad_tile % grid->height, cost);
             Py_DECREF(cost);
         }
@@ -100,45 +82,51 @@ static int check_status(SearchStatus status, const Grid *grid, int bad_tile) {
     }
 }
 
+/* The cheapest path from `start` to `end`: by jump point search on a grid of bools or of costs all the same, its
+   length scaled by that cost, and by A* on any other grid of costs. */
+static SearchStatus find_any_path(
+    const Grid *grid, int start, int end, int **tiles, int *tile_count, double *cost, double *distance, int *bad_tile
+) {
+    double cheapest = 1.0, dearest = 1.0;
+    if (grid->costs) {
+        SearchStatus status = check_costs(grid, &cheapest, &dearest, bad_tile);
+        if (status != SEARCH_DONE) return status;
+        if (cheapest != dearest && cheapest < INFINITY) {
+            return find_cheapest_path(grid, start, end, cheapest, tiles, tile_count, cost, distance);
+        }
+    }
+    SearchStatus status = find_path_by_jump_points(grid, start, end, tiles, tile_count, distance);
+    /* A path of no steps costs nothing, even on a grid with no passable tile to give a cost. */
+    *cost = *distance == 0.0 ? 0.0 : cheapest * *distance;
+    return status;
+}
+
 static PyObject *find_path(PyObject *module, PyObject *args) {
     (void)module;
-    PyObject *grid_object, *costs_object;
+    PyObject *grid_object;
     int start_i, start_j, end_i, end_j;
-    if (!PyArg_ParseTuple(args, "OiiiiO:find_path", &grid_object, &start_i, &start_j, &end_i, &end_j, &costs_object)) {
-        return NULL;
-    }
-    Py_buffer grid_view, costs_view;
+    if (!PyArg_ParseTuple(args, "Oiiii:find_path", &grid_object, &start_i, &start_j, &end_i, &end_j)) return NULL;
+    Py_buffer grid_view;
     Grid grid;
     if (read_grid(grid_object, &grid_view, &grid) < 0) return NULL;
-    if (read_costs(costs_object, &costs_view, &grid) < 0) {
-        PyBuffer_Release(&grid_view);
-        return NULL;
-    }
     int start = tile_at(&grid, start_i, start_j, "start");
     int end = start < 0 ? -1 : tile_at(&grid, end_i, end_j, "end");
     if (end < 0) {
-        release(&costs_view);
         PyBuffer_Release(&grid_view);
         return NULL;
     }
     int *tiles = NULL, tile_count = 0, bad_tile = -1;
-    double cost = INFINITY, distance = INFINITY, cheapest;
+    double cost = INFINITY, distance = INFINITY;
     SearchStatus status;
     Py_BEGIN_ALLOW_THREADS
-    if (grid.costs) {
-        status = check_costs(&grid, &cheapest, &bad_tile);
-        if (status == SEARCH_DONE) {
-            status = find_cheapest_path(&grid, start, end, cheapest, &tiles, &tile_count, &cost, &distance);
-        }
-    } else {
-        status = find_path_by_jump_points(&grid, start, end, &tiles, &tile_count, &distance);
-        cost = distance;
-    }
+    status = find_any_path(&grid, start, end, &tiles, &tile_count, &cost, &distance, &bad_tile);
     Py_END_ALLOW_THREADS
     int failed = check_status(status, &grid, bad_tile);
-    release(&costs_view);
     PyBuffer_Release(&grid_view);
-    if (failed) return NULL;
+    if (failed) {
+        free(tiles);
+        return NULL;
+    }
     if (!tiles) return Py_BuildValue("(ddO)", cost, distance, Py_None);
     Py_ssize_t size = 2 * (Py_ssize_t)tile_count * (Py_ssize_t)sizeof *tiles;
     PyObject *path = PyBytes_FromStringAndSize((const char *)tiles, size);
@@ -151,37 +139,28 @@ static PyObject *find_path(PyObject *module, PyObject *args) {
 
 static PyObject *distances_from(PyObject *module, PyObject *args) {
     (void)module;
-    PyObject *grid_object, *distances_object, *costs_object;
+    PyObject *grid_object, *distances_object;
     int start_i, start_j;
-    if (!PyArg_ParseTuple(args, "OiiOO:distances_from", &grid_object, &start_i, &start_j, &distances_object,
-                          &costs_object)) {
+    if (!PyArg_ParseTuple(args, "OiiO:distances_from", &grid_object, &start_i, &start_j, &distances_object)) {
         return NULL;
     }
-    Py_buffer grid_view, distances_view, costs_view;
+    Py_buffer grid_view, distances_view;
     Grid grid;
     if (read_grid(grid_object, &grid_view, &grid) < 0) return NULL;
-    if (read_costs(costs_object, &costs_view, &grid) < 0) {
-        PyBuffer_Release(&grid_view);
-        return NULL;
-    }
     int start = tile_at(&grid, start_i, start_j, "start");
-    Py_ssize_t tile_count = (Py_ssize_t)grid.width * grid.height;
-    if (start < 0 || read_items(distances_object, &distances_view, 1, "d", (Py_ssize_t)sizeof(double), tile_count,
-                                "the output") < 0) {
-        release(&costs_view);
+    if (start < 0 || read_output(distances_object, &distances_view, (Py_ssize_t)grid.width * grid.height) < 0) {
         PyBuffer_Release(&grid_view);
         return NULL;
     }
     int bad_tile = -1;
-    double cheapest;
+    double cheapest, dearest;
     SearchStatus status = SEARCH_DONE;
     Py_BEGIN_ALLOW_THREADS
-    if (grid.costs) status = check_costs(&grid, &cheapest, &bad_tile);
+    if (grid.costs) status = check_costs(&grid, &cheapest, &dearest, &bad_tile);
     if (status == SEARCH_DONE) status = fill_distances(&grid, start, (double *)distances_view.buf);
     Py_END_ALLOW_THREADS
     int failed = check_status(status, &grid, bad_tile);
     PyBuffer_Release(&distances_view);
-    release(&costs_view);
     PyBuffer_Release(&grid_view);
     if (failed) return NULL;
     Py_RETURN_NONE;
@@ -189,12 +168,12 @@ static PyObject *distances_from(PyObject *module, PyObject *args) {
 
 static PyMethodDef module_methods[] = {
     {"find_path", find_path, METH_VARARGS,
-     "find_path(passable, start_i, start_j, end_i, end_j, costs, /)\n--\n\n"
-     "The cheapest path's cost, its length and its tiles as C ints, i and j in turn, or None for the tiles if there is "
-     "none; `costs` is a buffer of doubles, or None."},
+     "find_path(grid, start_i, start_j, end_i, end_j, /)\n--\n\n"
+     "The cheapest path's cost, its length and its tiles as C ints, i and j in turn, or None for the tiles if there "
+     "is none. The grid is a buffer of bools, or of doubles, its costs."},
     {"distances_from", distances_from, METH_VARARGS,
-     "distances_from(passable, start_i, start_j, distances, costs, /)\n--\n\n"
-     "Write every tile's cost from the start into `distances`, its distance without costs."},
+     "distances_from(grid, start_i, start_j, distances, /)\n--\n\n"
+     "Write every tile's cost from the start into `distances`, its distance on a grid of bools."},
     {NULL, NULL, 0, NULL},
 };
 

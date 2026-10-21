@@ -105,8 +105,7 @@ SearchStatus find_path_by_jump_points(
         *distance = 0.0;
         return SEARCH_DONE;
     }
-    if (grid->costs) return SEARCH_BROKEN;
-    if (!grid->passable[start] || !grid->passable[end]) return SEARCH_DONE;
+    if (!is_passable(grid, start / height, start % height) || !is_passable(grid, end_i, end_j)) return SEARCH_DONE;
 
     size_t count = (size_t)grid->width * (size_t)height;
     double *cost = malloc(count * sizeof *cost);
