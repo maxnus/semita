@@ -15,19 +15,19 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # The version is the tag, which setuptools-scm reads from git.
           fetch-depth: 0
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: Build
         run: uv build --sdist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -45,7 +45,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: sdist
           path: sdist
@@ -60,29 +60,24 @@ jobs:
         with:
           package-dir: ${{ steps.sdist.outputs.path }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: wheels-${{ matrix.os }}
           path: wheelhouse/*.whl
 
   check:
-    # What would be uploaded: wheels on the stable ABI alone, and, for a release, the tag's version.
+    # What would be uploaded, all of it, and for a release the tag's version. Each wheel has already been audited for
+    # the stable ABI alone, by the audit-command in pyproject.toml.
     needs: [wheels, sdist]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-
       - name: List the files
         run: ls -l dist
-
-      - name: The stable ABI alone
-        run: uvx abi3audit@0.0.26 --strict --summary dist/*.whl
 
       - name: The tag is v and a version
         if: github.event_name == 'release'
@@ -108,7 +103,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true
