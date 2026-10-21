@@ -50,3 +50,15 @@ uv run pytest
 ```
 
 The tests check every search against scipy's Dijkstra over the same steps.
+
+## Releasing
+
+1. Set the new version in `src/semita/__init__.py`, which `pyproject.toml` reads, and merge it.
+2. Publish a GitHub release tagged `v` and that version, such as `v0.2.0`.
+
+The `release` workflow then builds a wheel for Linux x86_64 and aarch64, Windows AMD64 and macOS arm64 and x86_64,
+tests each, builds the sdist, checks that the wheels use the stable ABI alone and that the tag is the version, and
+uploads them to PyPI. Every pull request builds and checks the same files without uploading them.
+
+PyPI trusts the workflow through trusted publishing, from the repository's `pypi` environment, so no token is stored
+anywhere.

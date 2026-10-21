@@ -1,0 +1,93 @@
+name: release
+
+# A published GitHub release, tagged `v` and semita's version, builds every wheel and the sdist and uploads them to
+# PyPI. A pull request builds and checks the same files without uploading them.
+on:
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  wheels:
+    name: wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each wheel is built and tested on its own architecture: Linux x86_64 and aarch64, Windows AMD64, and macOS
+        # arm64 and x86_64. pyproject.toml's [tool.cibuildwheel] says what is built and how it is tested.
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, macos-15-intel]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        uses: pypa/cibuildwheel@v4.2.1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  sdist:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: uv build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  check:
+    # What would be uploaded: wheels on the stable ABI alone, and, for a release, the tag's version.
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: List the files
+        run: ls -l dist
+
+      - name: The stable ABI alone
+        run: uvx abi3audit --strict --summary dist/*.whl
+
+      - name: The tag is the version
+        if: github.event_name == 'release'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ ! -f "dist/semita-$version.tar.gz" ]; then
+            echo "The tag $GITHUB_REF_NAME is not v and semita's version, which built: $(ls dist)"
+            exit 1
+          fi
+
+  publish:
+    if: github.event_name == 'release'
+    needs: check
+    runs-on: ubuntu-latest
+    # PyPI trusts this workflow from this environment alone, so no token is stored anywhere.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/semita/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.2
