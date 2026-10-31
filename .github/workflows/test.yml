@@ -62,8 +62,6 @@ jobs:
             "import numpy, semita; assert semita.cheapest_path(numpy.ones((3, 3), bool), (0, 0), (2, 2)) is not None"
 
   oldest-numpy:
-    # The oldest numpy semita declares, on the oldest Python it supports, as the aiarena ladder's bot image carries
-    # (numpy 2.0.2 on Python 3.12).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
