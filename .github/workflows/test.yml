@@ -60,3 +60,21 @@ jobs:
           wheel=$(ls dist/semita-*-cp312-abi3-*.whl)
           uv run --isolated --no-project --python 3.14 --with "$wheel" python -c \
             "import numpy, semita; assert semita.cheapest_path(numpy.ones((3, 3), bool), (0, 0), (2, 2)) is not None"
+
+  oldest-numpy:
+    # The oldest numpy semita declares, on the oldest Python it supports, as the aiarena ladder's bot image carries
+    # (numpy 2.0.2 on Python 3.12).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install with numpy 2.0, compiling the extension
+        run: |
+          uv venv --python 3.12
+          SEMITA_WARNINGS_AS_ERRORS=1 uv pip install -e ".[dev]" "numpy==2.0.*"
+
+      - name: Test
+        run: .venv/bin/python -m pytest -v
